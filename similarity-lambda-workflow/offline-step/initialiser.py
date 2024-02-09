@@ -4,12 +4,14 @@ import utils
 # default_power_values = os.getenv('defaultPowerValues').split(',')
 default_power_values = ['128', '256', '512', '1024', '1536', '3008']    
 default_sla_value = 1000 # ms
+default_payload_value = 1 # application specific
 
 def lambda_handler(event, context):
     lambda_arn = event['lambdaARN']
     num = event['num']
     sla = extract_sla_value(event)
     power_values = extract_power_values(event)
+    payload = extract_payload(event)
 
     validate_input(lambda_arn, num)  # may throw
 
@@ -24,7 +26,17 @@ def lambda_handler(event, context):
 
     utils.set_lambda_power(lambda_arn, initial_power)
 
-    return {"powerValues": power_values, "sla": sla}
+    return {"powerValues": power_values, "sla": sla, "payload": payload, "lambdaARN": lambda_arn, "num": num}
+
+def extract_payload(event):
+    payload = event.get('payload')  # could be undefined
+
+    # use default value (defined at deploy-time) if not provided
+    if not payload:
+        payload = default_payload_value
+
+    return payload
+
 
 def extract_sla_value(event):
     sla = event.get('sla')  # could be undefined
