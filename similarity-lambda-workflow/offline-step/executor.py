@@ -2,7 +2,7 @@ import os
 import utils
 import asyncio
 
-minRAM = int(os.getenv('minRAM'))
+minRAM = int(os.getenv('minRAM', '128'))  # default to 128MB
 
 def handler(event, context):
     # read input from event
@@ -10,14 +10,15 @@ def handler(event, context):
     lambdaARN = data['lambdaARN']
     value = data['value']
     num = data['num']
-    enableParallel = data['enableParallel']
-    payload = data['payload']
-    dryRun = data['dryRun']
-    preProcessorARN = data['preProcessorARN']
-    postProcessorARN = data['postProcessorARN']
-    discardTopBottom = data['discardTopBottom']
-    sleepBetweenRunsMs = data['sleepBetweenRunsMs']
-    disablePayloadLogs = data['disablePayloadLogs']
+    powerValues = data['powerValues']
+    # enableParallel = data['enableParallel']
+    # payload = data['payload']
+    # dryRun = data['dryRun']
+    # preProcessorARN = data['preProcessorARN']
+    # postProcessorARN = data['postProcessorARN']
+    # discardTopBottom = data['discardTopBottom']
+    # sleepBetweenRunsMs = data['sleepBetweenRunsMs']
+    # disablePayloadLogs = data['disablePayloadLogs']
 
     validate_input(lambdaARN, value, num)  # may throw
 
@@ -103,6 +104,7 @@ async def extract_data_from_input(event):
         'value': int(event['value']),
         'lambdaARN': input['lambdaARN'],
         'num': int(input['num']),
+        'powerValues': input['powerValues'],
         'enableParallel': bool(input.get('parallelInvocation', False)),
         'payload': payload,
         'dryRun': input.get('dryRun', False),
@@ -174,8 +176,10 @@ def compute_statistics(base_cost, results, value, discard_top_bottom):
 # import concurrent.futures
 # import json
 
+
 # # Create a Lambda client
 # client = boto3.client('lambda')
+
 
 # def invoke_lambda(lambda_arn, payload):
 #     try:
@@ -192,7 +196,8 @@ def compute_statistics(base_cost, results, value, discard_top_bottom):
 # def lambda_handler(event, context):
 #     lambda_arn = event['lambdaARN']
 #     num = event['num']
-#     payload = event['payload']  # Get the payload from the input parameters
+#     payload = event['value']  # Get the payload from the input parameters
+#     powerValues = event['powerValues'] # Get the powerValues for alias/version
 
 #     # Use a ThreadPoolExecutor to run the Lambda functions in parallel
 #     with concurrent.futures.ThreadPoolExecutor() as executor:
