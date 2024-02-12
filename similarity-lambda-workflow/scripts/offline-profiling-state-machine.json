@@ -77,6 +77,7 @@
       "ItemSelector": {
         "lambdaARN.$": "$.Payload.lambdaARN",
         "num.$": "$.Payload.num",
+        "powerValues.$": "$.Payload.powerValues",
         "value.$": "$$.Map.Item.Value"
       },
       "ResultPath": "$.outputList"
