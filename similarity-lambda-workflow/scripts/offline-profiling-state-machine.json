@@ -1,5 +1,5 @@
 {
-  "Comment": "A description of my state machine",
+  "Comment": "This workflow profiles functions with different inputs to determine best input-based configuration",
   "StartAt": "createVersionAlias",
   "States": {
     "createVersionAlias": {
@@ -22,7 +22,64 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "preProcessCreateInputList"
+      "Next": "checkStepSize"
+    },
+    "checkStepSize": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Not": {
+            "Variable": "$.Payload.payload.stepSize",
+            "IsPresent": true
+          },
+          "Next": "InputMapper"
+        }
+      ],
+      "Default": "preProcessCreateInputList"
+    },
+    "InputMapper": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "executeVersionAlias",
+        "States": {
+          "executeVersionAlias": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "Payload.$": "$",
+              "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:executeFunctions:$LATEST"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 1,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "End": true,
+            "ResultSelector": {
+              "responseList.$": "$.Payload"
+            }
+          }
+        }
+      },
+      "Next": "DeleteVersions",
+      "ItemsPath": "$.Payload.payload.inputList",
+      "ItemSelector": {
+        "lambdaARN.$": "$.Payload.lambdaARN",
+        "num.$": "$.Payload.num",
+        "value.$": "$$.Map.Item.Value"
+      },
+      "ResultPath": "$.outputList"
     },
     "preProcessCreateInputList": {
       "Type": "Task",
@@ -44,7 +101,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "DeleteVersions",
+      "Next": "InputMapper",
       "InputPath": "$.Payload",
       "ResultSelector": {
         "inputList.$": "$.Payload"
@@ -85,12 +142,11 @@
         }
       },
       "End": true,
-      "ItemsPath": "$.Payload.powerValues",
       "ItemSelector": {
-        "input.$": "$.Payload",
         "lambdaARN.$": "$.Payload.lambdaARN",
         "value.$": "$$.Map.Item.Value"
-      }
+      },
+      "ItemsPath": "$.Payload.powerValues"
     }
   }
 }
