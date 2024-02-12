@@ -111,13 +111,13 @@ def get_lambda_config(lambda_arn, alias):
     response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier=alias)
     return response['Configuration']
 
-def get_lambda_config(lambda_arn, alias):
-    print(f'Getting current function config for alias {alias}')
-    lambda_client = lambda_client_from_arn(lambda_arn)
-    response = lambda_client.get_function_configuration(FunctionName=lambda_arn, Qualifier=alias)
-    architecture = response.get('Architectures', ['x86_64'])[0]
-    is_pending = response.get('State', '') == 'Pending'
-    return {'architecture': architecture, 'is_pending': is_pending}
+# def get_lambda_config(lambda_arn, alias):
+#     print(f'Getting current function config for alias {alias}')
+#     lambda_client = lambda_client_from_arn(lambda_arn)
+#     response = lambda_client.get_function_configuration(FunctionName=lambda_arn, Qualifier=alias)
+#     architecture = response.get('Architectures', ['x86_64'])[0]
+#     is_pending = response.get('State', '') == 'Pending'
+#     return {'architecture': architecture, 'is_pending': is_pending}
 
 def set_lambda_power(lambda_arn, value):
     print(f'Setting power to {value}')
@@ -202,14 +202,6 @@ def invoke_lambda(lambda_arn, alias, payload, disable_payload_logs):
         'LogResult': response.get('LogResult'),
         'Payload': response['Payload'].read().decode('utf-8')
     }
-def wait_for_alias_active(lambda_arn, alias):
-    print(f'Waiting for alias {alias} to be active')
-    while True:
-        lambda_client = lambda_client_from_arn(lambda_arn)
-        response = lambda_client.get_alias(FunctionName=lambda_arn, Name=alias)
-        if response['AliasArn']:
-            break
-        time.sleep(10 * 90)
 
 # Compute total cost
 def compute_total_cost(min_cost, min_ram, value, durations):
@@ -278,15 +270,6 @@ def compute_price(min_cost, min_ram, value, duration):
 
 def parse_log_and_extract_durations(data):
     return [extract_duration(base64.b64decode(log['LogResult']).decode('utf-8')) for log in data]
-
-def generate_payloads(num, payload_input):
-    if isinstance(payload_input, list):
-        return payload_input
-    else:
-        payloads = range(num)
-        for i in range(num):
-            payloads[i] = convert_payload(payload_input)
-        return payloads
     
 def generate_payloads(num, payload_input):
     if isinstance(payload_input, list):
