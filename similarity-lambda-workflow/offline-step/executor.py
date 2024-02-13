@@ -65,11 +65,10 @@ def lambda_handler(event, context):
         results = run_in_parallel(num, lambdaARN, lambdaAlias, value, powerValues, disablePayloadLogs)
     else:
         results = run_in_series(num, lambdaARN, lambdaAlias, value, disablePayloadLogs)
-
-    return results
-    # # get base cost for Lambda
-    # base_cost = utils.lambda_base_cost(utils.region_from_arn(lambdaARN), architecture)
     
+    # get base cost for Lambda
+    base_cost = utils.lambda_base_cost(utils.region_from_arn(lambdaARN), architecture[0])
+    return base_cost
     # return compute_statistics(base_cost, results, value, discardTopBottom)
 
 

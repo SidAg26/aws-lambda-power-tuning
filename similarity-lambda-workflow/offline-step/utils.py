@@ -16,6 +16,9 @@ lambda_client = boto3.client('lambda')
 # S3 client
 s3_client = boto3.client('s3')
 
+# AWS Pricing client
+pricing_client = boto3.client('pricing', region_name='us-east-1')
+
 def step_functions_cost(n_power):
     return round(step_functions_base_cost() * (6 + n_power), 5)
 
@@ -24,11 +27,68 @@ def step_functions_base_cost():
     return base_cost_for_region(prices, os.environ['AWS_REGION'])
 
 def lambda_base_cost(region, architecture):
-    prices = json.loads(os.environ['baseCosts'])
-    price_map = prices[architecture]
-    if not price_map:
-        raise ValueError('Unsupported architecture: ' + architecture)
-    return base_cost_for_region(price_map, region)
+    # prices = json.loads(os.environ['baseCosts'])
+    groups = []
+    price_list = {}
+    default_prices = {   "x86_64": {
+                "ap-east-1":2.9e-9,
+                 "af-south-1":2.8e-9,
+                 "me-south-1":2.6e-9,
+                 "eu-south-1":2.4e-9,
+                 "ap-northeast-3":2.7e-9,
+                 "cn-north-1":0.0000000142,
+                 "cn-northwest-1":0.0000000142,
+                 "default":2.1e-9
+                 }, 
+            "arm64": {"default":1.7e-9}
+    }
+    if architecture != 'arm64':
+        groups = ["AWS-Lambda-Duration", "AWS-Lambda-Requests"]
+    else:
+        groups = ["AWS-Lambda-Duration-ARM", "AWS-Lambda-Requests-ARM"]
+
+    for group in groups:
+        try:
+            response = pricing_client.get_products(ServiceCode='AWSLambda', 
+                                            Filters=[{'Type': 'TERM_MATCH', 
+                                                      'Field': 'group', 
+                                                      'Value': group},
+                                                      {
+                                                        'Type': 'TERM_MATCH',
+                                                        'Field': 'regionCode',
+                                                        'Value': region
+                                                      }])['PriceList']
+            price_list[f'{group}'] = extract_price_from_pricing(response)
+        except Exception as error:
+            print(f'Error during pricing fetch: {error}')
+            if region in default_prices[architecture]:
+                price_list[f'{group}'] = default_prices[architecture][region]
+            else:
+                price_list[f'{group}'] = default_prices[architecture]['default']
+            continue
+    return price_list
+
+
+def extract_price_from_pricing(price_list):
+    result = []
+    price_list = [json.loads(prices) for prices in price_list if isinstance(prices, str)]
+    print('Extracting price from pricing')
+    for item in price_list:
+        for term in item['terms']['OnDemand'].values():
+            price = term['priceDimensions'].values()
+            for pr in price:
+                result.append(float(pr['pricePerUnit']['USD']))
+    max_value = max(result) # return maximum cost from the list
+    return max_value
+
+
+def region_from_arn(arn):
+    try:
+        return arn.split(":")[3]
+    except IndexError:
+        raise ValueError("Invalid ARN format")
+    except Exception as error:
+        raise error
 
 def all_power_values():
     increment = 64
