@@ -39,10 +39,9 @@ def lambda_handler(event, context):
 
     # fetch architectures from Lambda
     config = [utils.get_lambda_config(lambdaARN, alias) for alias in lambdaAlias]
-    print(config)
     architecture = [config[i]['architecture'] for i in range(len(config))]
     isPending = [config[i]['is_pending'] for i in range(len(config))]
-    print(f'Detected architecture type: {architecture}, isPending: {isPending}')
+    # print(f'Detected architecture type: {architecture}, isPending: {isPending}')
 
     # # pre-generate an array of N payloads
     # payloads = utils.generate_payloads(num, payload)
@@ -60,7 +59,7 @@ def lambda_handler(event, context):
     # wait if the function/alias state is Pending
     if False in isPending:
         isPending = [utils.wait_for_alias_active(lambdaARN, alias) for alias in lambdaAlias]
-    print('Alias active')
+    # print('Alias active')
 
     if enableParallel:
         results = run_in_parallel(num, lambdaARN, lambdaAlias, value, powerValues, disablePayloadLogs)
@@ -122,12 +121,14 @@ def extract_discard_top_bottom_value(event):
 
 def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
     results = []
-    # Use a ThreadPoolExecutor to run all invocations in parallel ...
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(invoke_lambda_with_processors, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
-    # ... and wait for results
-    # Collect the responses from each Lambda function invocation
-    results = [future.result() for future in futures]
+    for _ in range(0, num):
+        # Use a ThreadPoolExecutor to run all invocations in parallel ...
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(invoke_lambda_with_processors, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
+        # ... and wait for results
+        # Collect the responses from each Lambda function invocation
+        responses = [future.result() for future in futures]
+        results.append(responses)
     return results
 
 def invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
@@ -143,7 +144,7 @@ def invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePaylo
             error_message += f" with payload {actual_payload}"
         raise Exception(error_message)
     # results.append(invocation_results)
-    print('Invocation results: ', invocation_results)
+    # print('Invocation results: ', invocation_results)
     return invocation_results
 
 async def run_in_series(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
