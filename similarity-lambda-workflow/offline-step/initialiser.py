@@ -65,5 +65,5 @@ def extract_power_values(event):
 def validate_input(lambda_arn, num):
     if not lambda_arn:
         raise ValueError('Missing or empty lambdaARN')
-    if not num or num < 5:
-        raise ValueError('Missing num or num below 5')
+    if not num or num < 1:
+        raise ValueError('Missing num or num below 1')
