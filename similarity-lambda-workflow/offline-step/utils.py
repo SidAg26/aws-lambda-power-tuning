@@ -6,6 +6,7 @@ import math
 import re
 import base64
 import numpy as np
+import base64
 from botocore.exceptions import NoCredentialsError
 from urllib.parse import urlparse, urlencode
 
@@ -105,19 +106,19 @@ def get_lambda_power(lambda_arn):
     response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier='$LATEST')
     return response['Configuration']['MemorySize']
 
-def get_lambda_config(lambda_arn, alias):
-    print(f'Getting current function config for alias {alias}')
-    lambda_client = lambda_client_from_arn(lambda_arn)
-    response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier=alias)
-    return response['Configuration']
-
 # def get_lambda_config(lambda_arn, alias):
 #     print(f'Getting current function config for alias {alias}')
 #     lambda_client = lambda_client_from_arn(lambda_arn)
-#     response = lambda_client.get_function_configuration(FunctionName=lambda_arn, Qualifier=alias)
-#     architecture = response.get('Architectures', ['x86_64'])[0]
-#     is_pending = response.get('State', '') == 'Pending'
-#     return {'architecture': architecture, 'is_pending': is_pending}
+#     response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier=alias)
+#     return response['Configuration']
+
+def get_lambda_config(lambda_arn, alias):
+    print(f'Getting current function config for alias {alias}')
+    lambda_client = lambda_client_from_arn(lambda_arn)
+    response = lambda_client.get_function_configuration(FunctionName=lambda_arn, Qualifier=alias)
+    architecture = response.get('Architectures', ['x86_64'])[0]
+    is_pending = response.get('State', '') == 'Pending'
+    return {'architecture': architecture, 'is_pending': is_pending}
 
 def set_lambda_power(lambda_arn, value):
     print(f'Setting power to {value}')
@@ -160,25 +161,28 @@ async def invoke_lambda_processor(processor_arn, payload, pre_or_post='Pre', dis
         raise Exception(error_message)
     return processor_data['Payload']
 
-async def invoke_lambda_with_processors(lambda_arn, alias, payload, pre_arn, post_arn, disable_payload_logs):
-    actual_payload = payload  # might change based on pre-processor
+def invoke_lambda_with_processors(lambda_arn, alias, payload, disable_payload_logs):
+    actual_payload = { 'payload': payload }  # might change based on pre-processor 
 
-    # first invoke pre-processor, if provided
-    if pre_arn:
-        print('Invoking pre-processor')
-        # overwrite payload with pre-processor's output (only if not empty)
-        pre_processor_output = await invoke_lambda_processor(pre_arn, payload, 'Pre', disable_payload_logs)
-        if pre_processor_output:
-            actual_payload = pre_processor_output
+    # # first invoke pre-processor, if provided
+    # if pre_arn:
+    #     print('Invoking pre-processor')
+    #     # overwrite payload with pre-processor's output (only if not empty)
+    #     pre_processor_output = await invoke_lambda_processor(pre_arn, payload, 'Pre', disable_payload_logs)
+    #     if pre_processor_output:
+    #         actual_payload = pre_processor_output
 
     # invoke function to be power-tuned
-    invocation_results = await invoke_lambda(lambda_arn, alias, actual_payload, disable_payload_logs)
-
-    # then invoke post-processor, if provided
-    if post_arn:
-        print('Invoking post-processor')
-        # note: invocation may have failed (invocation_results.FunctionError)
-        await invoke_lambda_processor(post_arn, invocation_results['Payload'], 'Post', disable_payload_logs)
+    try:
+        invocation_results = invoke_lambda(lambda_arn, alias, actual_payload, disable_payload_logs)
+    except Exception as error:
+        print('Error during invocation:')
+        raise error
+    # # then invoke post-processor, if provided
+    # if post_arn:
+    #     print('Invoking post-processor')
+    #     # note: invocation may have failed (invocation_results.FunctionError)
+    #     await invoke_lambda_processor(post_arn, invocation_results['Payload'], 'Post', disable_payload_logs)
 
     return {
         'actualPayload': actual_payload,
@@ -198,8 +202,8 @@ def invoke_lambda(lambda_arn, alias, payload, disable_payload_logs):
     )
     return {
         'StatusCode': response['StatusCode'],
-        'FunctionError': response.get('FunctionError'),
-        'LogResult': response.get('LogResult'),
+        'FunctionError': response.get('FunctionError') if response.get('FunctionError') else None,
+        'LogResult': base64.b64decode(response.get('LogResult')).decode('utf-8'),
         'Payload': response['Payload'].read().decode('utf-8')
     }
 

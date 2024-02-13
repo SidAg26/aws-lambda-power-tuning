@@ -1,85 +1,95 @@
 import os
 import utils
+import concurrent.futures
 import asyncio
 
 minRAM = int(os.getenv('minRAM', '128'))  # default to 128MB
 
-def handler(event, context):
+def lambda_handler(event, context):
     # read input from event
-    data = extract_data_from_input(event)
-    lambdaARN = data['lambdaARN']
-    value = data['value']
-    num = data['num']
-    powerValues = data['powerValues']
-    # enableParallel = data['enableParallel']
+    # data = extract_data_from_input(event)
+    lambdaARN = event['lambdaARN']
+    value = event['value'] if 'value' in event else None
+    # if payloadS3 is present, it will be used to fetch the payload
+    value = event['payloads3'] if 'payloadS3' in event else value 
+    num = event['num']
+    powerValues = event['powerValues']
+    dryRun = event['dryRun'] if 'dryRun' in event else False
+    # default to enable parallel invocation
+    enableParallel = event['enableParallel'] if 'enableParallel' in event else True
+    disablePayloadLogs = event['disablePayloadLogs'] if 'disablePayloadLogs' in event else False
+
     # payload = data['payload']
-    # dryRun = data['dryRun']
     # preProcessorARN = data['preProcessorARN']
     # postProcessorARN = data['postProcessorARN']
     # discardTopBottom = data['discardTopBottom']
     # sleepBetweenRunsMs = data['sleepBetweenRunsMs']
-    # disablePayloadLogs = data['disablePayloadLogs']
+    
 
-    validate_input(lambdaARN, value, num)  # may throw
+    validate_input(lambdaARN, value, num, powerValues)  # may throw
 
     # force only 1 execution if dryRun
     if dryRun:
         print('[Dry-run] forcing num=1')
         num = 1
 
-    lambdaAlias = 'RAM' + str(value)
+    # generate Lambda aliases from all powerValues
+    lambdaAlias = ['RAM' + str(i) for i in powerValues]
     results = None
 
-    # fetch architecture from $LATEST
-    config = utils.getLambdaConfig(lambdaARN, lambdaAlias)
-    architecture = config['architecture']
-    isPending = config['isPending']
+    # fetch architectures from Lambda
+    config = [utils.get_lambda_config(lambdaARN, alias) for alias in lambdaAlias]
+    print(config)
+    architecture = [config[i]['architecture'] for i in range(len(config))]
+    isPending = [config[i]['is_pending'] for i in range(len(config))]
     print(f'Detected architecture type: {architecture}, isPending: {isPending}')
 
-    # pre-generate an array of N payloads
-    payloads = utils.generate_payloads(num, payload)
-
-    run_input = {
-        'num': num,
-        'lambdaARN': lambdaARN,
-        'lambdaAlias': lambdaAlias,
-        'payloads': payloads,
-        'preARN': preProcessorARN,
-        'postARN': postProcessorARN,
-        'sleepBetweenRunsMs': sleepBetweenRunsMs,
-        'disablePayloadLogs': disablePayloadLogs,
-    }
+    # # pre-generate an array of N payloads
+    # payloads = utils.generate_payloads(num, payload)
+    # run_input = {
+    #     'num': num,
+    #     'lambdaARN': lambdaARN,
+    #     'lambdaAlias': lambdaAlias,
+    #     'payloads': payloads,
+    #     'preARN': preProcessorARN,
+    #     'postARN': postProcessorARN,
+    #     'sleepBetweenRunsMs': sleepBetweenRunsMs,
+    #     'disablePayloadLogs': disablePayloadLogs,
+    # }
 
     # wait if the function/alias state is Pending
-    if isPending:
-        utils.wait_for_alias_active(lambdaARN, lambdaAlias)
-        print('Alias active')
+    if False in isPending:
+        isPending = [utils.wait_for_alias_active(lambdaARN, alias) for alias in lambdaAlias]
+    print('Alias active')
 
     if enableParallel:
-        results = run_in_parallel(run_input)
+        results = run_in_parallel(num, lambdaARN, lambdaAlias, value, powerValues, disablePayloadLogs)
     else:
-        results = run_in_series(run_input)
+        results = run_in_series(num, lambdaARN, lambdaAlias, value, disablePayloadLogs)
 
-    # get base cost for Lambda
-    base_cost = utils.lambda_base_cost(utils.region_from_arn(lambdaARN), architecture)
+    return results
+    # # get base cost for Lambda
+    # base_cost = utils.lambda_base_cost(utils.region_from_arn(lambdaARN), architecture)
+    
+    # return compute_statistics(base_cost, results, value, discardTopBottom)
 
-    return compute_statistics(base_cost, results, value, discardTopBottom)
 
-
-def validate_input(lambdaARN, value, num):
+def validate_input(lambdaARN, value, num, powerValues):
     if not lambdaARN:
         raise ValueError('Missing or empty lambdaARN')
     if not value or not isinstance(value, (int, float)):
         raise ValueError('Invalid value: ' + str(value))
     if not num or not isinstance(num, int):
         raise ValueError('Invalid num: ' + str(num))
+    if not powerValues or not isinstance(powerValues, list):
+        raise ValueError('Invalid powerValues: ' + str(powerValues))
     
-async def extract_payload_value(input):
-    if 'payloadS3' in input:
-        return await utils.fetch_payload_from_s3(input['payloadS3'])  # might throw if access denied or 404
-    elif 'payload' in input:
-        return input['payload']
-    return None
+# def extract_payload_value(input):
+#     if 'payloadS3' in input:
+#         return utils.fetch_payload_from_s3(input['payloadS3'])  # might throw if access denied or 404
+#     elif 'value' in input:
+#         return input['value']
+#     return None
 
 def extract_discard_top_bottom_value(event):
     # extract discardTopBottom used to trim values from average duration
@@ -87,57 +97,64 @@ def extract_discard_top_bottom_value(event):
     # discardTopBottom must be between 0 and 0.4
     return min(max(discard_top_bottom, 0.0), 0.4)
 
-def extract_sleep_time(event):
-    sleep_between_runs_ms = event.get('sleepBetweenRunsMs', 0)
-    if not isinstance(sleep_between_runs_ms, int):
-        sleep_between_runs_ms = 0
-    else:
-        sleep_between_runs_ms = int(sleep_between_runs_ms)
-    return sleep_between_runs_ms
+# def extract_sleep_time(event):
+#     sleep_between_runs_ms = event.get('sleepBetweenRunsMs', 0)
+#     if not isinstance(sleep_between_runs_ms, int):
+#         sleep_between_runs_ms = 0
+#     else:
+#         sleep_between_runs_ms = int(sleep_between_runs_ms)
+#     return sleep_between_runs_ms
 
-async def extract_data_from_input(event):
-    input = event['input']  # original state machine input
-    payload = await extract_payload_value(input)
-    discard_top_bottom = extract_discard_top_bottom_value(input)
-    sleep_between_runs_ms = extract_sleep_time(input)
-    return {
-        'value': int(event['value']),
-        'lambdaARN': input['lambdaARN'],
-        'num': int(input['num']),
-        'powerValues': input['powerValues'],
-        'enableParallel': bool(input.get('parallelInvocation', False)),
-        'payload': payload,
-        'dryRun': input.get('dryRun', False),
-    }
+# def extract_data_from_input(event):
+#     # input = event['input']  # original state machine input
+#     payload = extract_payload_value(input)
+#     discard_top_bottom = extract_discard_top_bottom_value(input)
+#     sleep_between_runs_ms = extract_sleep_time(input)
+#     return {
+#         'value': int(event['value']),
+#         'lambdaARN': input['lambdaARN'],
+#         'num': int(input['num']),
+#         'powerValues': input['powerValues'],
+#         'enableParallel': bool(input.get('parallelInvocation', False)),
+#         'payload': payload,
+#         'dryRun': input.get('dryRun', False),
+#     }
 
-async def run_in_parallel(num, lambda_arn, lambda_alias, payloads, pre_arn, post_arn, disable_payload_logs):
+def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
     results = []
-    # run all invocations in parallel ...
-    invocations = [invoke_lambda_with_processors(i, lambda_arn, lambda_alias, payloads, pre_arn, post_arn, disable_payload_logs) for i in range(num)]
+    # Use a ThreadPoolExecutor to run all invocations in parallel ...
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(invoke_lambda_with_processors, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
     # ... and wait for results
-    await asyncio.gather(*invocations)
+    # Collect the responses from each Lambda function invocation
+    results = [future.result() for future in futures]
     return results
 
-async def invoke_lambda_with_processors(i, lambda_arn, lambda_alias, payloads, pre_arn, post_arn, disable_payload_logs):
-    results = []
-    invocation_results, actual_payload = await utils.invoke_lambda_with_processors(lambda_arn, lambda_alias, payloads[i], pre_arn, post_arn, disable_payload_logs)
+def invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
+    # results = []
+    result = utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs)
+    actual_payload = result['actualPayload']
+    invocation_results = result['invocationResults']
+    function_error = True if invocation_results['FunctionError'] is not None else False
     # invocation errors return 200 and contain FunctionError and Payload
-    if 'FunctionError' in invocation_results:
+    if function_error:
         error_message = f"Invocation error (running in parallel): {invocation_results['Payload']}"
-        if not disable_payload_logs:
+        if not disablePayloadLogs:
             error_message += f" with payload {actual_payload}"
         raise Exception(error_message)
-    results.append(invocation_results)
+    # results.append(invocation_results)
+    print('Invocation results: ', invocation_results)
+    return invocation_results
 
-async def run_in_series(num, lambda_arn, lambda_alias, payloads, pre_arn, post_arn, sleep_between_runs_ms, disable_payload_logs):
+async def run_in_series(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
     results = []
     for i in range(num):
         # run invocations in series
-        invocation_results, actual_payload = await utils.invoke_lambda_with_processors(lambda_arn, lambda_alias, payloads[i], pre_arn, post_arn, disable_payload_logs)
+        invocation_results, actual_payload = await utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads[i], pre_arn, post_arn, disablePayloadLogs)
         # invocation errors return 200 and contain FunctionError and Payload
         if 'FunctionError' in invocation_results:
             error_message = f"Invocation error (running in series): {invocation_results['Payload']}"
-            if not disable_payload_logs:
+            if not disablePayloadLogs:
                 error_message += f" with payload {actual_payload}"
             raise Exception(error_message)
         if sleep_between_runs_ms > 0:
@@ -181,10 +198,10 @@ def compute_statistics(base_cost, results, value, discard_top_bottom):
 # client = boto3.client('lambda')
 
 
-# def invoke_lambda(lambda_arn, payload):
+# def invoke_lambda(lambdaARN, payload):
 #     try:
 #         response = client.invoke(
-#             FunctionName=lambda_arn,
+#             FunctionName=lambdaARN,
 #             InvocationType='RequestResponse',  # Use 'RequestResponse' to get the response from the Lambda function
 #             Payload=json.dumps(payload)  # Pass the payload as a JSON-formatted string
 #         )
@@ -194,14 +211,14 @@ def compute_statistics(base_cost, results, value, discard_top_bottom):
 #         return None
 
 # def lambda_handler(event, context):
-#     lambda_arn = event['lambdaARN']
+#     lambdaARN = event['lambdaARN']
 #     num = event['num']
 #     payload = event['value']  # Get the payload from the input parameters
 #     powerValues = event['powerValues'] # Get the powerValues for alias/version
 
 #     # Use a ThreadPoolExecutor to run the Lambda functions in parallel
 #     with concurrent.futures.ThreadPoolExecutor() as executor:
-#         futures = [executor.submit(invoke_lambda, lambda_arn, payload) for _ in range(num)]
+#         futures = [executor.submit(invoke_lambda, lambdaARN, payload) for _ in range(num)]
 
 #     # Collect the responses from each Lambda function invocation
 #     responses = [future.result() for future in futures]
