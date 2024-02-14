@@ -35,7 +35,77 @@
           "Next": "InputMapper"
         }
       ],
-      "Default": "preProcessCreateInputList"
+      "Default": "preProcessingStage"
+    },
+    "preProcessingStage": {
+      "Type": "Parallel",
+      "Next": "InputMapper",
+      "Branches": [
+        {
+          "StartAt": "preProcessCreateInputList",
+          "States": {
+            "preProcessCreateInputList": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:preProcessInputList:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "InputPath": "$.Payload",
+              "ResultSelector": {
+                "inputList.$": "$.Payload"
+              },
+              "ResultPath": "$.Payload.payload",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "preProcessArchitectureState",
+          "States": {
+            "preProcessArchitectureState": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:preProcessArchitectureState:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true,
+              "ResultSelector": {
+                "architecture.$": "$.Payload.architectures",
+                "isPending.$": "$.Payload.isPending"
+              },
+              "ResultPath": "$.Payload.payload"
+            }
+          }
+        }
+      ]
     },
     "InputMapper": {
       "Type": "Map",
@@ -73,41 +143,16 @@
         }
       },
       "Next": "DeleteVersions",
-      "ItemsPath": "$.Payload.payload.inputList",
+      "ItemsPath": "$[0].Payload.payload.inputList",
       "ItemSelector": {
-        "lambdaARN.$": "$.Payload.lambdaARN",
-        "num.$": "$.Payload.num",
-        "powerValues.$": "$.Payload.powerValues",
+        "lambdaARN.$": "$[0].Payload.lambdaARN",
+        "num.$": "$[0].Payload.num",
+        "powerValues.$": "$[0].Payload.powerValues",
+        "architectures.$": "$[1].Payload.payload.architecture",
+        "isPending.$": "$[1].Payload.payload.isPending",
         "value.$": "$$.Map.Item.Value"
       },
-      "ResultPath": "$.outputList"
-    },
-    "preProcessCreateInputList": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "Parameters": {
-        "Payload.$": "$",
-        "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:preProcessInputList:$LATEST"
-      },
-      "Retry": [
-        {
-          "ErrorEquals": [
-            "Lambda.ServiceException",
-            "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
-          ],
-          "IntervalSeconds": 1,
-          "MaxAttempts": 3,
-          "BackoffRate": 2
-        }
-      ],
-      "Next": "InputMapper",
-      "InputPath": "$.Payload",
-      "ResultSelector": {
-        "inputList.$": "$.Payload"
-      },
-      "ResultPath": "$.Payload.payload"
+      "ResultPath": "$[0].outputList"
     },
     "DeleteVersions": {
       "Type": "Map",
@@ -144,10 +189,10 @@
       },
       "End": true,
       "ItemSelector": {
-        "lambdaARN.$": "$.Payload.lambdaARN",
+        "lambdaARN.$": "$[0].Payload.lambdaARN",
         "value.$": "$$.Map.Item.Value"
       },
-      "ItemsPath": "$.Payload.powerValues"
+      "ItemsPath": "$[0].Payload.powerValues"
     }
   }
 }
