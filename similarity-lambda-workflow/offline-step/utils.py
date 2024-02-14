@@ -166,11 +166,11 @@ def get_lambda_power(lambda_arn):
     response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier='$LATEST')
     return response['Configuration']['MemorySize']
 
-# def get_lambda_config(lambda_arn, alias):
-#     print(f'Getting current function config for alias {alias}')
+# def get_lambda_log_format(lambda_arn, alias):
+#     print(f'Getting current function log format for alias {alias}')
 #     lambda_client = lambda_client_from_arn(lambda_arn)
-#     response = lambda_client.get_function(FunctionName=lambda_arn, Qualifier=alias)
-#     return response['Configuration']
+#     response = lambda_client.get_function_configuration(FunctionName=lambda_arn, Qualifier=alias)
+#     return response.get('LoggingConfig').get('LogFormat')
 
 def get_lambda_config(lambda_arn, alias):
     print(f'Getting current function config for alias {alias}')
@@ -268,39 +268,50 @@ def invoke_lambda(lambda_arn, alias, payload, disable_payload_logs):
     }
 
 # Compute total cost
-def compute_total_cost(min_cost, min_ram, value, durations):
-    if not durations:
-        return 0
+def compute_total_cost(min_cost, min_ram, log_results):
+    # if not durations:
+    #     return 0
 
     # compute corresponding cost for each duration
-    costs = [compute_price(min_cost, min_ram, value, duration) for duration in durations]
+    costs = []
+    durations = log_results['duration']
+    value = log_results['memory_size']
+    for i in range(0, len(durations)):
+        costs.append(compute_price(min_cost, min_ram, value[i], durations[i]))
+    # costs = [compute_price(min_cost, min_ram, value, duration) for duration in durations]
 
     # sum all together
     return sum(costs)
 
 # Compute average duration
-def compute_average_duration(durations, discard_top_bottom):
-    if not durations:
-        return 0
+def compute_average_duration(log_results, discard_top_bottom=0):
+    # if not durations:
+    #     return 0
 
-    # a percentage of durations will be discarded (trimmed mean)
-    to_be_discarded = int(len(durations) * discard_top_bottom)
+    # # a percentage of durations will be discarded (trimmed mean)
+    # to_be_discarded = int(len(durations) * discard_top_bottom)
 
-    if discard_top_bottom > 0 and to_be_discarded == 0:
-        # not an error, but worth logging
-        # this happens when you have less than 5 invocations
-        # (only happens if dryrun or in tests)
-        print('not enough results to discard')
+    # if discard_top_bottom > 0 and to_be_discarded == 0:
+    #     # not an error, but worth logging
+    #     # this happens when you have less than 5 invocations
+    #     # (only happens if dryrun or in tests)
+    #     print('not enough results to discard')
 
-    new_n = len(durations) - 2 * to_be_discarded
+    # new_n = len(durations) - 2 * to_be_discarded
 
-    # compute trimmed mean (discard a percentage of low/high values)
-    durations.sort() # sort numerically
-    average_duration = sum(durations[to_be_discarded:-to_be_discarded if to_be_discarded > 0 else len(durations)]) / new_n
-
+    # # compute trimmed mean (discard a percentage of low/high values)
+    # durations.sort() # sort numerically
+    # average_duration = sum(durations[to_be_discarded:-to_be_discarded if to_be_discarded > 0 else len(durations)]) / new_n
+    memory_size = list(set(log_results['memory_size']))
+    average_duration = {}
+    for mem in memory_size:
+        average_duration[str(mem)] = sum([log_results['duration'][i] 
+                                     for i in range(0, len(log_results['duration'])) 
+                                     if log_results['memory_size'][i] == mem]) / len([i for i in log_results['memory_size'] if i == mem])
     return average_duration
 
 # Extract duration (in ms) from a given Lambda's CloudWatch log.
+# Assumes that log format of function is TEXT
 def extract_duration(log):
     regex = r'\tBilled Duration: (\d+) ms'
     match = re.search(regex, log)
@@ -308,8 +319,29 @@ def extract_duration(log):
         return int(match.group(1))
     return None
 
-def range(n):
-    return [i for i in range(n)]
+def extract_init_duration(log):
+    regex = r'\tInit Duration: (\d+) ms'
+    match = re.search(regex, log)
+    if match:
+        return int(match.group(1))
+    return None
+
+def extract_memory_size(log):
+    regex = r'\tMemory Size: (\d+) MB'
+    match = re.search(regex, log)
+    if match:
+        return int(match.group(1))
+    return None
+
+def extract_memory_used(log):
+    regex = r'\tMemory Used: (\d+) MB'
+    match = re.search(regex, log)
+    if match:
+        return int(match.group(1))
+    return None
+
+# def range(n):
+#     return [i for i in range(n)]
 
 def convert_payload(payload):
     def is_json_string(s):
@@ -330,10 +362,20 @@ def convert_payload(payload):
     return payload
 
 def compute_price(min_cost, min_ram, value, duration):
-    return math.ceil(duration) * min_cost * (value / min_ram)
+    min_cost = min_cost['AWS-Lambda-Duration']
+    return math.ceil(duration/1000) * min_cost * (value / (min_ram)) # GB-seconds
 
-def parse_log_and_extract_durations(data):
-    return [extract_duration(base64.b64decode(log['LogResult']).decode('utf-8')) for log in data]
+def parse_logs(data):
+    duration = [extract_duration(log['LogResult']) for log in data]
+    init_duration = [extract_init_duration(log['LogResult']) for log in data]
+    memory_size = [extract_memory_size(log['LogResult']) for log in data]
+    memory_used = [extract_memory_used(log['LogResult']) for log in data]
+    return {
+        'duration': duration,
+        'init_duration': init_duration,
+        'memory_size': memory_size,
+        'memory_used': memory_used
+    }
     
 def generate_payloads(num, payload_input):
     if isinstance(payload_input, list):

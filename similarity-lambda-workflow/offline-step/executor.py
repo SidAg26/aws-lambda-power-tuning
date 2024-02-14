@@ -9,7 +9,7 @@ def lambda_handler(event, context):
     # read input from event
     # data = extract_data_from_input(event)
     lambdaARN = event['lambdaARN']
-    value = event['value'] if 'value' in event else None
+    value = event['value'] if 'value' in event else None # this is the input value
     # if payloadS3 is present, it will be used to fetch the payload
     value = event['payloads3'] if 'payloadS3' in event else value 
     num = event['num']
@@ -18,12 +18,13 @@ def lambda_handler(event, context):
     # default to enable parallel invocation
     enableParallel = event['enableParallel'] if 'enableParallel' in event else True
     disablePayloadLogs = event['disablePayloadLogs'] if 'disablePayloadLogs' in event else False
+    sleepBetweenRunsMs = event['sleepBetweenRunsMs'] if 'sleepBetweenRunsMs' in event else 0
 
     # payload = data['payload']
     # preProcessorARN = data['preProcessorARN']
     # postProcessorARN = data['postProcessorARN']
     # discardTopBottom = data['discardTopBottom']
-    # sleepBetweenRunsMs = data['sleepBetweenRunsMs']
+    
     
 
     validate_input(lambdaARN, value, num, powerValues)  # may throw
@@ -62,14 +63,18 @@ def lambda_handler(event, context):
     # print('Alias active')
 
     if enableParallel:
-        results = run_in_parallel(num, lambdaARN, lambdaAlias, value, powerValues, disablePayloadLogs)
+        results = run_in_parallel(num, lambdaARN, lambdaAlias, value, disablePayloadLogs)
     else:
-        results = run_in_series(num, lambdaARN, lambdaAlias, value, disablePayloadLogs)
-    
+        results = run_in_series(num, lambdaARN, lambdaAlias, value, sleepBetweenRunsMs, disablePayloadLogs)
+    # for input=value results=[{value, alias1}, {value, alias2}...]
+    # put the results in DynamoDB table to access later and create similarity model
+        
     # get base cost for Lambda
     base_cost = utils.lambda_base_cost(utils.region_from_arn(lambdaARN), architecture[0])
-    return base_cost
-    # return compute_statistics(base_cost, results, value, discardTopBottom)
+    # base_cost= {'AWS-Lambda-Duration': 0.0000166667, 'AWS-Lambda-Requests': 0.20}
+
+    # return results
+    return compute_statistics(base_cost=base_cost, results=results, input_value=value)
 
 
 def validate_input(lambdaARN, value, num, powerValues):
@@ -118,19 +123,21 @@ def extract_discard_top_bottom_value(event):
 #         'dryRun': input.get('dryRun', False),
 #     }
 
-def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
+def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
     results = []
     for _ in range(0, num):
         # Use a ThreadPoolExecutor to run all invocations in parallel ...
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(invoke_lambda_with_processors, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
+            futures = [executor.submit(invoke_lambda, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
         # ... and wait for results
         # Collect the responses from each Lambda function invocation
-        responses = [future.result() for future in futures]
-        results.append(responses)
+        # responses = [future.result() for future in futures]
+        for future in futures:
+            results.append(future.result())
+        # results.append(responses)
     return results
 
-def invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
+def invoke_lambda(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
     # results = []
     result = utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs)
     actual_payload = result['actualPayload']
@@ -146,11 +153,11 @@ def invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePaylo
     # print('Invocation results: ', invocation_results)
     return invocation_results
 
-async def run_in_series(num, lambdaARN, lambdaAlias, payloads, powerValues, disablePayloadLogs):
+def run_in_series(num, lambdaARN, lambdaAlias, payloads, sleep_between_runs_ms, disablePayloadLogs):
     results = []
     for i in range(num):
         # run invocations in series
-        invocation_results, actual_payload = await utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads[i], pre_arn, post_arn, disablePayloadLogs)
+        invocation_results, actual_payload = utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs)
         # invocation errors return 200 and contain FunctionError and Payload
         if 'FunctionError' in invocation_results:
             error_message = f"Invocation error (running in series): {invocation_results['Payload']}"
@@ -158,71 +165,32 @@ async def run_in_series(num, lambdaARN, lambdaAlias, payloads, powerValues, disa
                 error_message += f" with payload {actual_payload}"
             raise Exception(error_message)
         if sleep_between_runs_ms > 0:
-            await asyncio.sleep(sleep_between_runs_ms / 1000)  # asyncio.sleep expects seconds, so we convert ms to s
+            asyncio.sleep(sleep_between_runs_ms / 1000)  # asyncio.sleep expects seconds, so we convert ms to s
         results.append(invocation_results)
     return results
 
-def compute_statistics(base_cost, results, value, discard_top_bottom):
+def compute_statistics(base_cost, results, input_value, discard_top_bottom=0):
     # use results (which include logs) to compute average duration ...
-    durations = utils.parse_log_and_extract_durations(results)
+    log_results = utils.parse_logs(results) # this list has all the 'powerValues' for an input 'value' for 'num' times
 
-    average_duration = utils.compute_average_duration(durations, discard_top_bottom)
+    average_duration = utils.compute_average_duration(log_results, discard_top_bottom) # returns average duration at powerValues
     print('Average duration: ', average_duration)
 
     # ... and overall statistics
-    average_price = utils.compute_price(base_cost, minRAM, value, average_duration)
+    average_price = {}
+    for key in average_duration.keys():
+        print(f'PowerValue: {key}, AverageDuration: {average_duration[key]}')
+        average_price[key] = utils.compute_price(base_cost, minRAM, int(key), average_duration[key])
 
     # .. and total cost (exact $)
-    total_cost = utils.compute_total_cost(base_cost, minRAM, value, durations)
+    total_cost = utils.compute_total_cost(base_cost, minRAM, log_results)
 
     stats = {
         'averagePrice': average_price,
         'averageDuration': average_duration,
         'totalCost': total_cost,
-        'value': value,
+        'value': input_value,
     }
 
     print('Stats: ', stats)
     return stats
-
-
-
-
-
-# import boto3
-# import concurrent.futures
-# import json
-
-
-# # Create a Lambda client
-# client = boto3.client('lambda')
-
-
-# def invoke_lambda(lambdaARN, payload):
-#     try:
-#         response = client.invoke(
-#             FunctionName=lambdaARN,
-#             InvocationType='RequestResponse',  # Use 'RequestResponse' to get the response from the Lambda function
-#             Payload=json.dumps(payload)  # Pass the payload as a JSON-formatted string
-#         )
-#         return response['Payload'].read()  # Return the response payload
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-#         return None
-
-# def lambda_handler(event, context):
-#     lambdaARN = event['lambdaARN']
-#     num = event['num']
-#     payload = event['value']  # Get the payload from the input parameters
-#     powerValues = event['powerValues'] # Get the powerValues for alias/version
-
-#     # Use a ThreadPoolExecutor to run the Lambda functions in parallel
-#     with concurrent.futures.ThreadPoolExecutor() as executor:
-#         futures = [executor.submit(invoke_lambda, lambdaARN, payload) for _ in range(num)]
-
-#     # Collect the responses from each Lambda function invocation
-#     responses = [future.result() for future in futures]
-
-#     # Now 'responses' is a list of responses from each Lambda function invocation
-#     return responses
-
