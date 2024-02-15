@@ -22,17 +22,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "checkStepSize",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "Comment": "cleanUpOnError",
-          "Next": "cleanUpOnError",
-          "ResultPath": "$.Payload.payload.error"
-        }
-      ]
+      "Next": "checkStepSize"
     },
     "checkStepSize": {
       "Type": "Choice",
@@ -115,41 +105,7 @@
             }
           }
         }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "Comment": "cleanUpOnError",
-          "Next": "cleanUpOnError",
-          "ResultPath": "$.Payload.payload.error"
-        }
       ]
-    },
-    "cleanUpOnError": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "OutputPath": "$.Payload",
-      "Parameters": {
-        "Payload.$": "$",
-        "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:cleanupOnError:$LATEST"
-      },
-      "Retry": [
-        {
-          "ErrorEquals": [
-            "Lambda.ServiceException",
-            "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
-          ],
-          "IntervalSeconds": 1,
-          "MaxAttempts": 3,
-          "BackoffRate": 2
-        }
-      ],
-      "End": true,
-      "InputPath": "$[0].Payload"
     },
     "InputMapper": {
       "Type": "Map",
@@ -186,7 +142,7 @@
           }
         }
       },
-      "Next": "cleanUpOnError",
+      "Next": "DeleteVersions",
       "ItemsPath": "$[0].Payload.payload.inputList",
       "ItemSelector": {
         "lambdaARN.$": "$[0].Payload.lambdaARN",
@@ -196,17 +152,47 @@
         "isPending.$": "$[1].Payload.payload.isPending",
         "value.$": "$$.Map.Item.Value"
       },
-      "ResultPath": "$[0].Payload.payload.stats",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "Comment": "cleanUpOnError",
-          "Next": "cleanUpOnError",
-          "ResultPath": "$.Payload.payload.error"
+      "ResultPath": "$[0].outputList"
+    },
+    "DeleteVersions": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "cleanUpVersionAlias",
+        "States": {
+          "cleanUpVersionAlias": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "OutputPath": "$.Payload",
+            "Parameters": {
+              "Payload.$": "$",
+              "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:cleanFunctionVersions:$LATEST"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 1,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "End": true
+          }
         }
-      ]
+      },
+      "End": true,
+      "ItemSelector": {
+        "lambdaARN.$": "$[0].Payload.lambdaARN",
+        "value.$": "$$.Map.Item.Value"
+      },
+      "ItemsPath": "$[0].Payload.powerValues"
     }
   }
 }
