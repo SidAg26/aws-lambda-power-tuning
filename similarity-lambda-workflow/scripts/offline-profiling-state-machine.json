@@ -22,7 +22,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "checkStepSize",
+      "Next": "preProcessingStage",
       "Catch": [
         {
           "ErrorEquals": [
@@ -33,19 +33,6 @@
           "ResultPath": "$.Payload.payload.error"
         }
       ]
-    },
-    "checkStepSize": {
-      "Type": "Choice",
-      "Choices": [
-        {
-          "Not": {
-            "Variable": "$.Payload.payload.stepSize",
-            "IsPresent": true
-          },
-          "Next": "InputMapper"
-        }
-      ],
-      "Default": "preProcessingStage"
     },
     "preProcessingStage": {
       "Type": "Parallel",
@@ -149,7 +136,7 @@
         }
       ],
       "End": true,
-      "InputPath": "$[0].Payload"
+      "InputPath": "$.Payload"
     },
     "InputMapper": {
       "Type": "Map",
@@ -186,7 +173,6 @@
           }
         }
       },
-      "Next": "cleanUpOnError",
       "ItemsPath": "$[0].Payload.payload.inputList",
       "ItemSelector": {
         "lambdaARN.$": "$[0].Payload.lambdaARN",
@@ -203,10 +189,35 @@
             "States.ALL"
           ],
           "Comment": "cleanUpOnError",
-          "Next": "cleanUpOnError",
+          "Next": "cleanUpStage",
           "ResultPath": "$.Payload.payload.error"
         }
-      ]
+      ],
+      "Next": "cleanUpStage"
+    },
+    "cleanUpStage": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "Payload.$": "$",
+        "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:cleanupOnError:$LATEST"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true,
+      "InputPath": "$[0].Payload"
     }
   }
 }
