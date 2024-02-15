@@ -30,7 +30,7 @@
           ],
           "Comment": "cleanUpOnError",
           "Next": "cleanUpOnError",
-          "ResultPath": "$.Payload.payload.error"
+          "ResultPath": "$.Payload.error"
         }
       ]
     },
@@ -110,7 +110,7 @@
           ],
           "Comment": "cleanUpOnError",
           "Next": "cleanUpOnError",
-          "ResultPath": "$.Payload.payload.error"
+          "ResultPath": "$.Payload.error"
         }
       ]
     },
@@ -190,7 +190,7 @@
           ],
           "Comment": "cleanUpOnError",
           "Next": "cleanUpStage",
-          "ResultPath": "$.Payload.payload.error"
+          "ResultPath": "$[0].Payload.error"
         }
       ],
       "Next": "cleanUpStage"

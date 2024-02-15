@@ -5,7 +5,7 @@ def lambda_handler(event, context):
         i_max = input_dict['max'] if 'max' in input_dict else 100
         i_step = input_dict['stepSize'] if 'stepSize' in input_dict else None
     else:
-        i_min = 0
+        i_min = 1
         i_max = 100
         i_step = None
     if i_step:
