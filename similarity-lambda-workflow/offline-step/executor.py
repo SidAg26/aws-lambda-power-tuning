@@ -19,7 +19,8 @@ def lambda_handler(event, context):
     enableParallel = event['enableParallel'] if 'enableParallel' in event else True
     disablePayloadLogs = event['disablePayloadLogs'] if 'disablePayloadLogs' in event else False
     sleepBetweenRunsMs = event['sleepBetweenRunsMs'] if 'sleepBetweenRunsMs' in event else 0
-
+    architecture = event['architectures'] if 'architectures' in event else "x86_64"
+    isPending = event['isPending'] if 'isPending' in event else False
     # payload = data['payload']
     # preProcessorARN = data['preProcessorARN']
     # postProcessorARN = data['postProcessorARN']
@@ -38,11 +39,11 @@ def lambda_handler(event, context):
     lambdaAlias = ['RAM' + str(i) for i in powerValues]
     results = None
 
-    # fetch architectures from Lambda
-    config = [utils.get_lambda_config(lambdaARN, alias) for alias in lambdaAlias]
-    architecture = [config[i]['architecture'] for i in range(len(config))]
-    isPending = [config[i]['is_pending'] for i in range(len(config))]
-    # print(f'Detected architecture type: {architecture}, isPending: {isPending}')
+    # # fetch architectures from Lambda
+    # config = [utils.get_lambda_config(lambdaARN, alias) for alias in lambdaAlias]
+    # architecture = [config[i]['architecture'] for i in range(len(config))]
+    # isPending = [config[i]['is_pending'] for i in range(len(config))]
+    print(f'Detected architecture type: {architecture}, isPending: {isPending}')
 
     # # pre-generate an array of N payloads
     # payloads = utils.generate_payloads(num, payload)
