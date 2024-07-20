@@ -321,7 +321,7 @@ def extract_duration(log):
     return None
 
 def extract_init_duration(log):
-    regex = r'\tInit Duration: (\d+) ms'
+    regex = r'\tInit Duration: (\d+)'
     match = re.search(regex, log)
     if match:
         return int(match.group(1))
