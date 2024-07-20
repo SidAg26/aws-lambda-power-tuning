@@ -42,30 +42,31 @@ def lambda_base_cost(region, architecture):
                  }, 
             "arm64": {"default":1.7e-9}
     }
-    if architecture != 'arm64':
-        groups = ["AWS-Lambda-Duration", "AWS-Lambda-Requests"]
-    else:
-        groups = ["AWS-Lambda-Duration-ARM", "AWS-Lambda-Requests-ARM"]
+    # if architecture != 'arm64':
+    #     groups = ["AWS-Lambda-Duration", "AWS-Lambda-Requests"]
+    # else:
+    #     groups = ["AWS-Lambda-Duration-ARM", "AWS-Lambda-Requests-ARM"]
 
-    for group in groups:
-        try:
-            response = pricing_client.get_products(ServiceCode='AWSLambda', 
-                                            Filters=[{'Type': 'TERM_MATCH', 
-                                                      'Field': 'group', 
-                                                      'Value': group},
-                                                      {
-                                                        'Type': 'TERM_MATCH',
-                                                        'Field': 'regionCode',
-                                                        'Value': region
-                                                      }])['PriceList']
-            price_list[f'{group}'] = extract_price_from_pricing(response)
-        except Exception as error:
-            print(f'Error during pricing fetch: {error}')
-            if region in default_prices[architecture]:
-                price_list[f'{group}'] = default_prices[architecture][region]
-            else:
-                price_list[f'{group}'] = default_prices[architecture]['default']
-            continue
+    # for group in groups:
+    #     try:
+    #         response = pricing_client.get_products(ServiceCode='AWSLambda', 
+    #                                         Filters=[{'Type': 'TERM_MATCH', 
+    #                                                   'Field': 'group', 
+    #                                                   'Value': group},
+    #                                                   {
+    #                                                     'Type': 'TERM_MATCH',
+    #                                                     'Field': 'regionCode',
+    #                                                     'Value': region
+    #                                                   }])['PriceList']
+    #         price_list[f'{group}'] = extract_price_from_pricing(response)
+    #     except Exception as error:
+    #         print(f'Error during pricing fetch: {error}')
+    #         if region in default_prices[architecture]:
+    #             price_list[f'{group}'] = default_prices[architecture][region]
+    #         else:
+    #             price_list[f'{group}'] = default_prices[architecture]['default']
+    #         continue
+    price_list = {'AWS-Lambda-Duration': 0.0000166667, 'AWS-Lambda-Requests': 0.20}
     return price_list
 
 
