@@ -58,9 +58,11 @@ def lambda_handler(event, context):
     #     'disablePayloadLogs': disablePayloadLogs,
     # }
 
+
+    # Error - Too many requests, removed this and introduced Waiter step
     # wait if the function/alias state is Pending
-    if False in isPending:
-        isPending = [utils.wait_for_alias_active(lambdaARN, alias) for alias in lambdaAlias]
+    # if False in isPending:
+    #     isPending = [utils.wait_for_alias_active(lambdaARN, alias) for alias in lambdaAlias]
     # print('Alias active')
 
     if enableParallel:
@@ -126,18 +128,22 @@ def extract_discard_top_bottom_value(event):
 
 def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
     results = []
-    for _ in range(0, num):
-        # Use a ThreadPoolExecutor to run all invocations in parallel ...
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(invoke_lambda, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
-        # ... and wait for results
-        # Collect the responses from each Lambda function invocation
-        # responses = [future.result() for future in futures]
-        for future in futures:
-            results.append(future.result())
-        # results.append(responses)
+    try:
+        for _ in range(0, num):
+            # Use a ThreadPoolExecutor to run all invocations in parallel ...
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(invoke_lambda, lambdaARN, alias, payloads, disablePayloadLogs) for alias in lambdaAlias]
+            # ... and wait for results
+            # Collect the responses from each Lambda function invocation
+            # responses = [future.result() for future in futures]
+            for future in futures:
+                results.append(future.result())
+            # results.append(responses)
+    except Exception as e:
+        print('Error in parallel invocation: ', e)
+        raise e
     return results
-
+    
 def invoke_lambda(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
     # results = []
     result = utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs)
