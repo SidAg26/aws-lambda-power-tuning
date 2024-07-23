@@ -1,5 +1,6 @@
 # import os
 import utils
+import time
 
 # default_power_values = os.getenv('defaultPowerValues').split(',')
 default_power_values = ['128', '256', '512', '1024', '1536', '3008']    
@@ -26,7 +27,9 @@ def lambda_handler(event, context):
 
     utils.set_lambda_power(lambda_arn, initial_power)
 
-    return {"powerValues": power_values, "sla": sla, "payload": payload, "lambdaARN": lambda_arn, "num": num}
+    return {"powerValues": power_values, "sla": sla, 
+            "payload": payload, "lambdaARN": lambda_arn, 
+            "num": num, "startTime": int(time.time()*1000)}
 
 def extract_payload(event):
     payload = event.get('payload')  # could be undefined
