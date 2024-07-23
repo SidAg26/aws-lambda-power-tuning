@@ -1,0 +1,272 @@
+{
+    "Comment": "This workflow profiles functions with different inputs to determine best input-based configuration",
+    "StartAt": "createVersionAlias",
+    "States": {
+      "createVersionAlias": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "Payload.$": "$",
+          "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:createFunctionVersions:$LATEST"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+            ],
+            "IntervalSeconds": 1,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ],
+        "Next": "preProcessingStage",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Comment": "cleanUpOnError",
+            "Next": "cleanUpOnError",
+            "ResultPath": "$.Payload.error"
+          }
+        ]
+      },
+      "preProcessingStage": {
+        "Type": "Parallel",
+        "Next": "Wait for specific time - Alias ready",
+        "Branches": [
+          {
+            "StartAt": "preProcessCreateInputList",
+            "States": {
+              "preProcessCreateInputList": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "Payload.$": "$",
+                  "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:preProcessInputList:$LATEST"
+                },
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "Lambda.ServiceException",
+                      "Lambda.AWSLambdaException",
+                      "Lambda.SdkClientException",
+                      "Lambda.TooManyRequestsException"
+                    ],
+                    "IntervalSeconds": 1,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                  }
+                ],
+                "InputPath": "$.Payload",
+                "ResultSelector": {
+                  "inputList.$": "$.Payload"
+                },
+                "ResultPath": "$.Payload.payload",
+                "End": true
+              }
+            }
+          },
+          {
+            "StartAt": "preProcessArchitectureState",
+            "States": {
+              "preProcessArchitectureState": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "Payload.$": "$",
+                  "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:preProcessArchitectureState:$LATEST"
+                },
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "Lambda.ServiceException",
+                      "Lambda.AWSLambdaException",
+                      "Lambda.SdkClientException",
+                      "Lambda.TooManyRequestsException"
+                    ],
+                    "IntervalSeconds": 1,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                  }
+                ],
+                "End": true,
+                "ResultSelector": {
+                  "architecture.$": "$.Payload.architectures",
+                  "isPending.$": "$.Payload.isPending"
+                },
+                "ResultPath": "$.Payload.payload"
+              }
+            }
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Comment": "cleanUpOnError",
+            "Next": "cleanUpOnError",
+            "ResultPath": "$.Payload.error"
+          }
+        ]
+      },
+      "Wait for specific time - Alias ready": {
+        "Type": "Wait",
+        "Seconds": 90,
+        "Next": "InputMapper",
+        "Comment": "waiting for alias ready - too many requests error on API"
+      },
+      "cleanUpOnError": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "OutputPath": "$.Payload",
+        "Parameters": {
+          "Payload.$": "$",
+          "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:cleanupOnError:$LATEST"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+            ],
+            "IntervalSeconds": 1,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ],
+        "End": true,
+        "InputPath": "$.Payload"
+      },
+      "InputMapper": {
+        "Type": "Map",
+        "ItemProcessor": {
+          "ProcessorConfig": {
+            "Mode": "INLINE"
+          },
+          "StartAt": "executeVersionAlias",
+          "States": {
+            "executeVersionAlias": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:executeFunctions:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true,
+              "ResultSelector": {
+                "responseList.$": "$.Payload"
+              }
+            }
+          }
+        },
+        "ItemsPath": "$[0].Payload.payload.inputList",
+        "ItemSelector": {
+          "lambdaARN.$": "$[0].Payload.lambdaARN",
+          "num.$": "$[0].Payload.num",
+          "powerValues.$": "$[0].Payload.powerValues",
+          "architectures.$": "$[1].Payload.payload.architecture",
+          "isPending.$": "$[1].Payload.payload.isPending",
+          "value.$": "$$.Map.Item.Value"
+        },
+        "ResultPath": "$[0].Payload.payload.stats",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Comment": "cleanUpOnError",
+            "Next": "cleanUpStage",
+            "ResultPath": "$[0].Payload.error"
+          }
+        ],
+        "Next": "cleanUpStage"
+      },
+      "cleanUpStage": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "Payload.$": "$",
+          "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:cleanupOnError:$LATEST"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+            ],
+            "IntervalSeconds": 1,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ],
+        "InputPath": "$[0].Payload",
+        "Next": "Choice",
+        "ResultPath": null
+      },
+      "Choice": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.error",
+            "IsPresent": true,
+            "Next": "Fail"
+          }
+        ],
+        "Default": "Wait for sandbox cleanup"
+      },
+      "Wait for sandbox cleanup": {
+        "Type": "Wait",
+        "Seconds": 60,
+        "Next": "logParsingLambda"
+      },
+      "Fail": {
+        "Type": "Fail",
+        "ErrorPath": "$[0].Payload.error",
+        "Cause": "Something happened during the mapper state"
+      },
+      "logParsingLambda": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "Payload.$": "$",
+          "FunctionName": "arn:aws:lambda:ap-southeast-2:030103857128:function:logParsingTester:$LATEST"
+        },
+        "InputPath": "$[0].Payload",
+        "ResultPath": null,
+        "End": true,
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Wait for sandbox cleanup",
+            "Comment": "timeout error retry",
+            "ResultPath": null
+          }
+        ],
+        "TimeoutSeconds": 600
+      }
+    }
+  }
