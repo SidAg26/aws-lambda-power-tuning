@@ -64,11 +64,25 @@ def lambda_handler(event, context):
                 }
         except:
             continue
-
-    # # Get the list of log events from Lambda Insights
-    # parsed_events, last_event_time = extract_lambda_insights(client, lambda_arn, 
-    #                                                          parsed_events, end_time, start_time)
     
+    # Get the payload value from the executor lambda function
+    filter_pattern = 'PAYLOAD'
+    # Retrieve log events based on the filter pattern
+    response = client.filter_log_events(
+        logGroupName='/aws/lambda/executeFunctions', # ENTER THE EXECUTOR FUNCTION LOG GROUP
+        startTime=start_time,
+        endTime=end_time,
+        filterPattern=filter_pattern
+    )
+
+    # Parse the log events
+    for event in response['events']:
+        request_id = extract_request_id_from_payload(event['message'])
+        if request_id is not None:
+            parsed_events[request_id] = {
+                'payload': extract_payload_value(event['message'])
+            }
+    print(parsed_events)
     return end_time
 
 def cloudwatch_client_from_arn(lambda_arn):
@@ -121,4 +135,18 @@ def extract_memory_used(log):
     match = re.search(regex, log)
     if match:
         return int(match.group(1))
+    return None
+
+def extract_payload_value(log):
+    regex = r'Input:\t(.*)\n'
+    match = re.search(regex, log)
+    if match:
+        return match.group(1)
+    return None
+
+def extract_request_id_from_payload(log):
+    regex = r'RequestId:\t([a-f0-9-]+)\t'
+    match = re.search(regex, log)
+    if match:
+        return match.group(1)
     return None
