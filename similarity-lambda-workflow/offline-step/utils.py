@@ -223,8 +223,8 @@ async def invoke_lambda_processor(processor_arn, payload, pre_or_post='Pre', dis
     return processor_data['Payload']
 
 def invoke_lambda_with_processors(lambda_arn, alias, payload, disable_payload_logs):
-    actual_payload = { 'payload': payload }  # might change based on pre-processor 
-
+    # actual_payload = { 'payload': payload }  # might change based on pre-processor 
+    actual_payload = {'n': payload} # as per matmul example
     # # first invoke pre-processor, if provided
     # if pre_arn:
     #     print('Invoking pre-processor')
