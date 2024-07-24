@@ -2,6 +2,7 @@ import os
 import json
 import boto3
 import time
+import datetime
 import math
 import re
 import base64
@@ -261,6 +262,10 @@ def invoke_lambda(lambda_arn, alias, payload, disable_payload_logs):
         Payload=json.dumps(payload),
         Qualifier=alias
     )
+
+    # Extract Request ID from the response metadata
+    request_id = response['ResponseMetadata']['RequestId']
+    print(f'PAYLOAD\tRequestId:\t{request_id}\tQualifier:\t{alias}\tInput:\t{payload}\n')
     return {
         'StatusCode': response['StatusCode'],
         'FunctionError': response.get('FunctionError') if response.get('FunctionError') else None,
