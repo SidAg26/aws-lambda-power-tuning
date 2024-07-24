@@ -367,6 +367,8 @@ def compute_price(min_cost, min_ram, value, duration):
     return math.ceil(duration/1000) * min_cost * (value / (min_ram)) # GB-seconds
 
 def parse_logs(data):
+    # handle the errors (OOM, timeout, RuntimeExit, etc.) and log the payload
+    function_error = [True if log['FunctionError'] is not None else False for log in data]
     duration = [extract_duration(log['LogResult']) for log in data]
     init_duration = [extract_init_duration(log['LogResult']) for log in data]
     memory_size = [extract_memory_size(log['LogResult']) for log in data]
@@ -375,7 +377,8 @@ def parse_logs(data):
         'duration': duration,
         'init_duration': init_duration,
         'memory_size': memory_size,
-        'memory_used': memory_used
+        'memory_used': memory_used,
+        'function_error': function_error
     }
     
 def generate_payloads(num, payload_input):

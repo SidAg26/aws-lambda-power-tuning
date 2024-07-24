@@ -53,6 +53,15 @@ def lambda_handler(event, context):
                     'memory_size': extract_memory_size(log['message']),
                     'memory_used': extract_memory_used(log['message'])
                 }
+            match = r'Error|'\
+                    r'Exception|'\
+                    r'error'
+            match = re.search(match, log['message'])
+            if match is not None:
+                request_id = extract_request_id(log['message'])
+                parsed_events[request_id] = {
+                    'function_error': extract_function_error(log['message'])
+                }
         except:
             continue
 
@@ -60,12 +69,24 @@ def lambda_handler(event, context):
     parsed_events, last_event_time = extract_lambda_insights(client, lambda_arn, 
                                                              parsed_events, end_time, start_time)
     # parsed_events += lambda_insights
-    print(parsed_events)
     return parsed_events
 
 def cloudwatch_client_from_arn(lambda_arn):
     region = lambda_arn.split(":")[3]
     return boto3.client('logs', region_name=region)
+
+def extract_function_error(log):
+    regex = r'Error: (?P<Error>.*)|'\
+            r'Exception: (?P<Exception>.*)|'\
+            r'error: (?P<error>.*)'
+    match = re.search(regex, log)
+    if match.group('Error'):
+        return match.group('Error')
+    elif match.group('Exception'):
+        return match.group('Exception')
+    elif match.group('error'):
+        return match.group('error')
+    return None
 
 def extract_request_id(log):
     regex = r'^REPORT RequestId:\s+([a-f0-9-]+)'
@@ -149,13 +170,13 @@ def extract_lambda_insights(client, lambda_arn, parsed_events, end_time, start_t
                 processed_events[request_id] = {
                     'cpu_user_time': log_message['cpu_user_time'],
                     'cpu_system_time': log_message['cpu_system_time'],
-                    'duration': log_message['duration'],
+                    'insights_duration': log_message['duration'],
                     'memory_utilisation': log_message['memory_utilization'],
                     'billed_duration': log_message['billed_duration'],
                     'billed_mb_ms': log_message['billed_mb_ms'],
                     'function_name': log_message['function_name'],
                     'cold_start': log_message['cold_start'],
-                    'init_duration': log_message['init_duration'] if 'init_duration' in log_message else 0,
+                    'insight_init_duration': log_message['init_duration'] if 'init_duration' in log_message else 0,
                     'used_memory_max': log_message['used_memory_max'],
                     'total_memory': log_message['total_memory'],
                     'total_network': log_message['total_network'],
