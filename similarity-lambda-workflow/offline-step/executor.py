@@ -147,17 +147,29 @@ def run_in_parallel(num, lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
 def invoke_lambda(lambdaARN, lambdaAlias, payloads, disablePayloadLogs):
     # results = []
     result = utils.invoke_lambda_with_processors(lambdaARN, lambdaAlias, payloads, disablePayloadLogs)
+
+    # The response from the Lambda function is following:
+    # 1. StatusCode: 200, 202
+    # 2. ExecutedVersion: $LATEST, 1, 2, 3, ...
+    # 3. Payload: "Hello from Lambda!"
+    # 4. FunctionError: If present, indicates that an error occurred during function execution.
+    #   It is only populated if the invocation type is RequestResponse and an error occurs.
+    # 5. LogResult: Base64 encoded string that contains the last 4 KB of log data produced by your Lambda function.
+
     actual_payload = result['actualPayload']
     invocation_results = result['invocationResults']
     function_error = True if invocation_results['FunctionError'] is not None else False
+    
     # invocation errors return 200 and contain FunctionError and Payload
-    if function_error:
-        error_message = f"Invocation error (running in parallel): {invocation_results['Payload']}"
-        if not disablePayloadLogs:
-            error_message += f" with payload {actual_payload}"
-        raise Exception(error_message)
-    # results.append(invocation_results)
-    # print('Invocation results: ', invocation_results)
+    # we need to handle these errors - OOM, Timeout, Killed, etc.
+    # if function_error:
+    #     # collect the invocation_results and send for parsing
+    #     error_message = f"Invocation error (running in parallel): {invocation_results['Payload']}"
+    #     if not disablePayloadLogs:
+    #         error_message += f" with payload {actual_payload}"
+    #     raise Exception(error_message)
+    
+
     return invocation_results
 
 def run_in_series(num, lambdaARN, lambdaAlias, payloads, sleep_between_runs_ms, disablePayloadLogs):
