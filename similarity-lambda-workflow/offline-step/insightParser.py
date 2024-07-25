@@ -1,5 +1,6 @@
 import boto3
 import re
+import os
 import time
 import json
 
@@ -7,29 +8,34 @@ def lambda_handler(event, context):
     lambda_arn = event['lambdaARN']
     
     # TODO: Fetch the last streamed log request id
-    end_time = event['endTime']['endTime'] if 'endTime' in event else int(time.time() * 1000)  # Current time in milliseconds
-    start_time = event['startTime'] if 'startTime' in event else end_time - 900000 # 15 minutes ago in milliseconds
+    start_time = os.environ.get('startTime', int(time.time() * 1000) - 900000)
+    start_time = int(start_time) if isinstance(start_time, str) else start_time
+
+    end_time = os.environ.get('endTime', int(time.time() * 1000))
+    end_time = int(end_time) if isinstance(end_time, str) else end_time
+
+
     # Create a CloudWatch Logs client
     client = cloudwatch_client_from_arn(lambda_arn)
-    parsed_events = event['parsedEvents'] if 'parsedEvents' in event else {}
-    # # Get the list of log events from Lambda Insights
-    parsed_events, last_event_time = extract_lambda_insights(client, lambda_arn, 
-                                                             parsed_events, end_time, start_time)
     
+    # Get the list of log events from Lambda Insights
+    parsed_events, last_event_time = extract_lambda_insights(client, lambda_arn, end_time, start_time)
+    
+    _dynamo_table = boto3.resource('dynamodb').Table('function_logs')
+    process_logs_in_batch(parsed_events, _dynamo_table, 20)
+
     return parsed_events
 
 def cloudwatch_client_from_arn(lambda_arn):
     region = lambda_arn.split(":")[3]
     return boto3.client('logs', region_name=region)
 
-def extract_lambda_insights(client, lambda_arn, parsed_events, end_time, start_time):
+def extract_lambda_insights(client, lambda_arn, end_time, start_time):
     # Define the log group and log stream names
     log_group_name = '/aws/lambda-insights'
     last_event_time = [0]
-    # Define start and end times for the logs (example: last 24 hours)
-    # end_time = int(time.time() * 1000)  # Current time in milliseconds
-    # start_time = end_time - 86400000  # 24 hours ago in milliseconds
-    processed_events = parsed_events if parsed_events else {}
+
+    processed_events = {}
 
     log_stream_name = []
     while len(log_stream_name) == 0:
@@ -42,11 +48,12 @@ def extract_lambda_insights(client, lambda_arn, parsed_events, end_time, start_t
         log_streams = response['logStreams']
         
         for log_stream in log_streams:
+            # print("first condition: ", log_stream['firstEventTimestamp'] >= start_time)
             if log_stream['logStreamName'].startswith(f'{lambda_arn.split(":")[-1]}/') and \
-                end_time >= log_stream['lastIngestionTime'] >= start_time:
+                log_stream['firstEventTimestamp'] >= start_time:
                 log_stream_name.append(log_stream['logStreamName'])
-                last_event_time.append(log_stream['lastIngestionTime'])            
-        time.sleep(10)
+                last_event_time.append(log_stream['lastIngestionTime'])    
+                print(log_stream)
 
 
     print(log_stream_name)
@@ -55,8 +62,7 @@ def extract_lambda_insights(client, lambda_arn, parsed_events, end_time, start_t
         response = client.get_log_events(
             logGroupName=log_group_name,
             logStreamName=lg,
-            startTime=start_time,
-            endTime=end_time
+            startTime=start_time
         )
 
         # Process the log events
@@ -98,5 +104,50 @@ def extract_lambda_insights(client, lambda_arn, parsed_events, end_time, start_t
     if log_stream_name is not []:
         last_event_time = [max(last_event_time)]
         # print(last_event_time)
-    
+    print("here are the processed_events: ", processed_events)
     return processed_events, last_event_time
+
+def process_logs_in_batch(log_events, table, batch_size):
+    if not log_events:
+        return
+    batch = dict(list(log_events.items())[:batch_size])
+    for request_id, log in batch.items():
+        try:
+            # Check if the log value is a dictionary
+            if isinstance(log, dict):
+                # Remove request_id from the log
+                del log['request_id']
+                # Initialize parts of the update expression
+                update_expression_parts = []
+                expression_attribute_values = {}
+                expression_attribute_names = {}
+
+                # Construct the update expression and attribute values
+                for key, value in log.items():
+                    column_name = key
+                    placeholder = f':{column_name}'
+                    update_expression_parts.append(f'#{column_name} = {placeholder}')
+                    expression_attribute_values[placeholder] = value
+                    expression_attribute_names[f'#{column_name}'] = key
+
+                # Join the parts to form the complete update expression
+                update_expression = 'SET ' + ', '.join(update_expression_parts)
+                print(update_expression) 
+                print(expression_attribute_values)
+
+                # Correctly pass the constructed ExpressionAttributeNames
+                table.update_item(
+                    Key={'request_id': request_id},
+                    UpdateExpression=update_expression,
+                    ExpressionAttributeNames=expression_attribute_names,
+                    ExpressionAttributeValues=expression_attribute_values
+                )
+            else:
+                print(f"Invalid log format for request_id: {request_id}")
+        except Exception as e:
+            print(f"Failed to update item in DynamoDB: {e}")
+            raise e
+    # Recursively process the remaining events
+    remaining_events = dict(list(log_events.items())[batch_size:])
+    if remaining_events:
+        process_logs_in_batch(remaining_events, table, batch_size)
