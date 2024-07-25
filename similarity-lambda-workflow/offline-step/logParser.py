@@ -1,11 +1,13 @@
 import boto3
 import re
 import time
-import json
 
 def lambda_handler(event, context):
     lambda_arn = event['lambdaARN']
     last_event_time = None
+    insight_function_name = 'getLogInsights' # ENTER THE LogInsight FUNCTION NAME
+    executor_function_name = 'executeFunctions' # ENTER THE EXECUTOR FUNCTION NAME
+
     # TODO: Fetch the last streamed log request id
     end_time = int(time.time() * 1000)  # Current time in milliseconds
     # start_time = end_time - 900000  # 15 minutes ago in milliseconds
@@ -69,7 +71,7 @@ def lambda_handler(event, context):
     filter_pattern = 'PAYLOAD'
     # Retrieve log events based on the filter pattern
     response = client.filter_log_events(
-        logGroupName='/aws/lambda/executeFunctions', # ENTER THE EXECUTOR FUNCTION LOG GROUP
+        logGroupName=f'/aws/lambda/{executor_function_name}', # ENTER THE EXECUTOR FUNCTION LOG GROUP
         startTime=start_time,
         endTime=end_time,
         filterPattern=filter_pattern
@@ -82,12 +84,64 @@ def lambda_handler(event, context):
             parsed_events[request_id] = {
                 'payload': extract_payload_value(event['message'])
             }
-    print(parsed_events)
+    # print(parsed_events)
+    _dynamodb = dynamodb_client_from_arn(lambda_arn)
+    _table = _dynamodb.Table('function_logs') # ENTER THE DYNAMODB TABLE NAME
+    process_logs_in_batch(parsed_events, _table, 10)
+
+    # Update the environment variables
+    set_enviroment_variables(start_time, end_time, lambda_arn, insight_function_name)
     return end_time
+
+def set_enviroment_variables(start_time, end_time, lambda_arn, function_name):
+    _client = boto3.client('lambda', region_name=lambda_arn.split(":")[3])
+    new_env = { 
+        'startTime': str(start_time),
+        'endTime': str(end_time)
+    }
+    try:
+        response = _client.update_function_configuration(
+            FunctionName=function_name,
+            Environment={
+                'Variables': new_env
+            }
+        )
+    except Exception as e:
+        print(f"Failed to update environment variables: {e}")
+        raise e
+
+    
+
+
+def process_logs_in_batch(log_events, table, batch_size):
+    if not log_events:
+        return
+    batch = dict(list(log_events.items())[:batch_size])
+    try:
+        with table.batch_writer() as batch_writer:
+            for request_id, log in batch.items():
+                batch_writer.put_item(
+                    Item={
+                        'request_id': request_id,
+                        **log
+                    }
+                )
+    except Exception as e:
+        print(f"Failed to write to DynamoDB: {e}")
+        raise e    
+    # Recursively process the remaining events
+    remaining_events = dict(list(log_events.items())[batch_size:])
+    if remaining_events:
+        process_logs_in_batch(remaining_events, table, batch_size)
+
 
 def cloudwatch_client_from_arn(lambda_arn):
     region = lambda_arn.split(":")[3]
     return boto3.client('logs', region_name=region)
+
+def dynamodb_client_from_arn(lambda_arn):
+    region = lambda_arn.split(":")[3]
+    return boto3.resource('dynamodb', region_name=region)
 
 def extract_function_error(log):
     regex = r'Error: (?P<Error>.*)|'\
