@@ -38,25 +38,36 @@ def extract_lambda_insights(client, lambda_arn, end_time, start_time):
     processed_events = {}
 
     log_stream_name = []
-    while len(log_stream_name) == 0:
-        response = client.describe_log_streams(
-        logGroupName=log_group_name,
-        orderBy='LastEventTime',
-        descending=True
-        )
+    log_streams = []
+    next_token = None
+    while True:
+        if next_token:
+            response = client.describe_log_streams(
+            logGroupName=log_group_name,
+            orderBy='LastEventTime',
+            descending=True,
+            nextToken=next_token
+            )
+        else:
+            response = client.describe_log_streams(
+            logGroupName=log_group_name,
+            orderBy='LastEventTime',
+            descending=True
+            )
 
-        log_streams = response['logStreams']
-        
-        for log_stream in log_streams:
-            # print("first condition: ", log_stream['firstEventTimestamp'] >= start_time)
-            if log_stream['logStreamName'].startswith(f'{lambda_arn.split(":")[-1]}/') and \
-                log_stream['firstEventTimestamp'] >= start_time:
-                log_stream_name.append(log_stream['logStreamName'])
-                last_event_time.append(log_stream['lastIngestionTime'])    
-                print(log_stream)
-
-
-    print(log_stream_name)
+        log_streams.extend(response['logStreams'])
+        next_token = response.get('nextToken')
+        if not next_token:
+            break
+    for log_stream in log_streams:
+        # print("first condition: ", log_stream['firstEventTimestamp'] >= start_time)
+        if log_stream['logStreamName'].startswith(f'{lambda_arn.split(":")[-1]}/') and \
+            log_stream['firstEventTimestamp'] >= start_time:
+            log_stream_name.append(log_stream['logStreamName'])
+            last_event_time.append(log_stream['lastIngestionTime'])    
+            # print(log_stream)
+            
+    # print(log_stream_name)
     for lg in log_stream_name:
     # Get the log events from the log group and log stream
         response = client.get_log_events(
@@ -96,7 +107,9 @@ def extract_lambda_insights(client, lambda_arn, end_time, start_time):
                     'tmp_max': log_message['tmp_max'],
                     'agent_memory_max': log_message['agent_memory_max'],
                     'fd_use': log_message['fd_use'],
-                    'version': log_message['version']
+                    'version': log_message['version'],
+                    'shutdown': log_message['shutdown'] if 'shutdown' in log_message else 0,
+                    'shutdown_reason': log_message['shutdown_reason'] if 'shutdown_reason' in log_message else 0
                 }
             except Exception as e:
                 print("Error parsing log message:", e)
@@ -104,7 +117,6 @@ def extract_lambda_insights(client, lambda_arn, end_time, start_time):
     if log_stream_name is not []:
         last_event_time = [max(last_event_time)]
         # print(last_event_time)
-    print("here are the processed_events: ", processed_events)
     return processed_events, last_event_time
 
 def process_logs_in_batch(log_events, table, batch_size):
@@ -132,8 +144,6 @@ def process_logs_in_batch(log_events, table, batch_size):
 
                 # Join the parts to form the complete update expression
                 update_expression = 'SET ' + ', '.join(update_expression_parts)
-                print(update_expression) 
-                print(expression_attribute_values)
 
                 # Correctly pass the constructed ExpressionAttributeNames
                 table.update_item(
