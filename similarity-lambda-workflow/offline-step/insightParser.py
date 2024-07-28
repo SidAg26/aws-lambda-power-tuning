@@ -24,7 +24,7 @@ def lambda_handler(event, context):
     _dynamo_table = boto3.resource('dynamodb').Table('function_logs')
     process_logs_in_batch(parsed_events, _dynamo_table, 20)
 
-    return parsed_events
+    return "Successfully processed logs"
 
 def cloudwatch_client_from_arn(lambda_arn):
     region = lambda_arn.split(":")[3]
