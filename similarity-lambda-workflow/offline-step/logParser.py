@@ -26,21 +26,47 @@ def lambda_handler(event, context):
     # Get the list of log streams
     log_streams = []
     for log_group_name in log_group_names:
-        log_streams += client.describe_log_streams(logGroupName=log_group_name,
-                                                   orderBy='LastEventTime',
-                                                   descending=True)['logStreams']
+        next_token = None
+        while True:
+            if next_token:
+                response = client.describe_log_streams(logGroupName=log_group_name,
+                                                         orderBy='LastEventTime',
+                                                        descending=True,
+                                                        nextToken=next_token)
+            else:
+                response = client.describe_log_streams(logGroupName=log_group_name,
+                                                        orderBy='LastEventTime',
+                                                        descending=True)
+            log_streams += response['logStreams']
+            next_token = response.get('nextToken', None)
+            if not next_token:
+                break
 
 
     # Get the list of log events
     log_events = []
     for log_stream in log_streams:
-        response = client.get_log_events(
-            logGroupName=log_group_name,
-            logStreamName=log_stream['logStreamName'],
-            startTime=start_time,
-            endTime=end_time
-        )
-        log_events += response['events']
+        next_token = None
+        while True:
+            if next_token:
+                response = client.get_log_events(
+                    logGroupName=log_group_name,
+                    logStreamName=log_stream['logStreamName'],
+                    startTime=start_time,
+                    endTime=end_time,
+                    nextToken=next_token
+                )
+            else:
+                response = client.get_log_events(
+                    logGroupName=log_group_name,
+                    logStreamName=log_stream['logStreamName'],
+                    startTime=start_time,
+                    endTime=end_time
+                )
+            log_events += response['events']
+            next_token = response.get('nextForwardToken', None)
+            if not next_token:
+                break
     
     # Parse the log events
     parsed_events = {}
@@ -49,45 +75,78 @@ def lambda_handler(event, context):
             match = re.search(r'^REPORT RequestId:', log['message'])
             if match is not None:
                 request_id = extract_request_id(log['message'])
-                parsed_events[request_id] = {
-                    'duration': extract_duration(log['message']),
-                    'init_duration': extract_init_duration(log['message']),
-                    'memory_size': extract_memory_size(log['message']),
-                    'memory_used': extract_memory_used(log['message'])
-                }
+                if request_id in parsed_events:
+                    parsed_events[request_id].update({
+                        'duration': extract_duration(log['message']),
+                        'init_duration': extract_init_duration(log['message']),
+                        'memory_size': extract_memory_size(log['message']),
+                        'memory_used': extract_memory_used(log['message'])
+                    })
+                else:
+                    parsed_events[request_id] = {
+                        'duration': extract_duration(log['message']),
+                        'init_duration': extract_init_duration(log['message']),
+                        'memory_size': extract_memory_size(log['message']),
+                        'memory_used': extract_memory_used(log['message'])
+                    }
             match = r'Error|'\
                     r'Exception|'\
                     r'error'
             match = re.search(match, log['message'])
             if match is not None:
-                request_id = extract_request_id(log['message'])
-                parsed_events[request_id] = {
-                    'function_error': extract_function_error(log['message'])
-                }
+                request_id = extract_request_id_from_error(log['message'])
+                if request_id in parsed_events:
+                    parsed_events[request_id].update({
+                        'function_error': extract_function_error(log['message'])
+                    })
+                else:
+                    parsed_events[request_id] = {
+                        'function_error': extract_function_error(log['message'])
+                    }
         except:
             continue
     
     # Get the payload value from the executor lambda function
     filter_pattern = 'PAYLOAD'
-    # Retrieve log events based on the filter pattern
-    response = client.filter_log_events(
-        logGroupName=f'/aws/lambda/{executor_function_name}', # ENTER THE EXECUTOR FUNCTION LOG GROUP
-        startTime=start_time,
-        endTime=end_time,
-        filterPattern=filter_pattern
-    )
+    log_events = []
+    next_token = None
+
+    while True:
+        if next_token:
+            response = client.filter_log_events(
+                logGroupName=f'/aws/lambda/{executor_function_name}', # ENTER THE EXECUTOR FUNCTION LOG GROUP
+                startTime=start_time,
+                endTime=end_time,
+                filterPattern=filter_pattern,
+                nextToken=next_token
+            )
+        else:
+            response = client.filter_log_events(
+                logGroupName=f'/aws/lambda/{executor_function_name}', # ENTER THE EXECUTOR FUNCTION LOG GROUP
+                startTime=start_time,
+                endTime=end_time,
+                filterPattern=filter_pattern
+            )
+        log_events += response['events']
+        next_token = response.get('nextToken', None)
+        if not next_token:
+            break
 
     # Parse the log events
-    for event in response['events']:
+    for event in log_events:
         request_id = extract_request_id_from_payload(event['message'])
-        if request_id is not None:
+        if request_id is not None and request_id in parsed_events:
+            parsed_events[request_id].update({
+                'payload': extract_payload_value(event['message'])
+            })
+        else:
             parsed_events[request_id] = {
                 'payload': extract_payload_value(event['message'])
             }
     # print(parsed_events)
     _dynamodb = dynamodb_client_from_arn(lambda_arn)
     _table = _dynamodb.Table('function_logs') # ENTER THE DYNAMODB TABLE NAME
-    process_logs_in_batch(parsed_events, _table, 10)
+    process_logs_in_batch(parsed_events, _table, 25)
 
     # Update the environment variables
     set_enviroment_variables(start_time, end_time, lambda_arn, insight_function_name)
@@ -127,7 +186,8 @@ def process_logs_in_batch(log_events, table, batch_size):
                     }
                 )
     except Exception as e:
-        print(f"Failed to write to DynamoDB: {e}")
+        # print(f"Failed to write to DynamoDB: {e}")
+        print(f"Failed batch: {batch}")
         raise e    
     # Recursively process the remaining events
     remaining_events = dict(list(log_events.items())[batch_size:])
@@ -200,6 +260,13 @@ def extract_payload_value(log):
 
 def extract_request_id_from_payload(log):
     regex = r'RequestId:\t([a-f0-9-]+)\t'
+    match = re.search(regex, log)
+    if match:
+        return match.group(1)
+    return None
+
+def extract_request_id_from_error(log):
+    regex = r'RequestId:\s+([a-f0-9-]+)'
     match = re.search(regex, log)
     if match:
         return match.group(1)
