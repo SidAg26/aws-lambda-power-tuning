@@ -67,7 +67,7 @@ def lambda_handler(event, context):
             match = r'Error|'\
                     r'Exception|'\
                     r'error'
-            match = re.search(match, log['message'])
+            match = re.search(match, log['message'], re.IGNORECASE)
             if match is not None:
                 request_id = extract_request_id_from_error(log['message'])
                 if request_id in parsed_events:
@@ -182,7 +182,7 @@ def extract_function_error(log):
     regex = r'Error: (?P<Error>.*)|'\
             r'Exception: (?P<Exception>.*)|'\
             r'error: (?P<error>.*)'
-    match = re.search(regex, log)
+    match = re.search(regex, log, re.IGNORECASE)
     if match.group('Error'):
         return match.group('Error')
     elif match.group('Exception'):
@@ -242,6 +242,10 @@ def extract_request_id_from_payload(log):
 
 def extract_request_id_from_error(log):
     regex = r'RequestId:\s+([a-f0-9-]+)'
+    match = re.search(regex, log)
+    if match:
+        return match.group(1)
+    regex = r'"function_request_id":\s*"([a-f0-9-]+)"'
     match = re.search(regex, log)
     if match:
         return match.group(1)
