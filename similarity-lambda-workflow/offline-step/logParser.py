@@ -18,56 +18,29 @@ def lambda_handler(event, context):
 
     # Get the list of log groups
     log_groups = client.describe_log_groups()
-    log_group_names = [group['logGroupName'] for group 
-                       in log_groups['logGroups'] 
-                       if group['logGroupName'].endswith('/aws/lambda/' \
-                                                         + lambda_arn.split(':')[-1])]
-    
-    # Get the list of log streams
-    log_streams = []
+    lambda_suffix = '/aws/lambda/' + lambda_arn.split(':')[-1]
+    log_group_names = [group['logGroupName'] for group in log_groups['logGroups'] if group['logGroupName'].endswith(lambda_suffix)]
+
+    # Get the list of log events using filter_log_events
+    log_events = []
     for log_group_name in log_group_names:
         next_token = None
         while True:
+            params = {
+                'logGroupName': log_group_name,
+                'startTime': start_time,
+                'endTime': end_time,
+                'interleaved': True
+            }
             if next_token:
-                response = client.describe_log_streams(logGroupName=log_group_name,
-                                                         orderBy='LastEventTime',
-                                                        descending=True,
-                                                        nextToken=next_token)
-            else:
-                response = client.describe_log_streams(logGroupName=log_group_name,
-                                                        orderBy='LastEventTime',
-                                                        descending=True)
-            log_streams += response['logStreams']
-            next_token = response.get('nextToken', None)
-            if not next_token:
-                break
-
-
-    # Get the list of log events
-    log_events = []
-    for log_stream in log_streams:
-        next_token = None
-        while True:
-            if next_token:
-                response = client.get_log_events(
-                    logGroupName=log_group_name,
-                    logStreamName=log_stream['logStreamName'],
-                    startTime=start_time,
-                    endTime=end_time,
-                    nextToken=next_token
-                )
-            else:
-                response = client.get_log_events(
-                    logGroupName=log_group_name,
-                    logStreamName=log_stream['logStreamName'],
-                    startTime=start_time,
-                    endTime=end_time
-                )
-            log_events += response['events']
-            next_token = response.get('nextForwardToken', None)
+                params['nextToken'] = next_token
+            response = client.filter_log_events(**params)
+            log_events.extend(response['events'])
+            next_token = response.get('nextToken')
             if not next_token:
                 break
     
+    print("total events: ", len(log_events))
     # Parse the log events
     parsed_events = {}
     for log in log_events:
@@ -80,14 +53,16 @@ def lambda_handler(event, context):
                         'duration': extract_duration(log['message']),
                         'init_duration': extract_init_duration(log['message']),
                         'memory_size': extract_memory_size(log['message']),
-                        'memory_used': extract_memory_used(log['message'])
+                        'memory_used': extract_memory_used(log['message']),
+                        'start_time': log['timestamp']
                     })
                 else:
                     parsed_events[request_id] = {
                         'duration': extract_duration(log['message']),
                         'init_duration': extract_init_duration(log['message']),
                         'memory_size': extract_memory_size(log['message']),
-                        'memory_used': extract_memory_used(log['message'])
+                        'memory_used': extract_memory_used(log['message']),
+                        'start_time': log['timestamp']
                     }
             match = r'Error|'\
                     r'Exception|'\
