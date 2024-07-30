@@ -21,7 +21,7 @@ def lambda_handler(event, context):
     # Get the list of log events from Lambda Insights
     parsed_events, last_event_time = extract_lambda_insights(client, lambda_arn, end_time, start_time)
     
-    _dynamo_table = boto3.resource('dynamodb').Table('function_logs')
+    _dynamo_table = boto3.resource('dynamodb', region_name=lambda_arn.split(":")[3]).Table('function_logs')
     process_logs_in_batch(parsed_events, _dynamo_table, 20)
 
     return "Successfully processed logs"
