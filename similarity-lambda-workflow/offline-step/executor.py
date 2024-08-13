@@ -4,14 +4,26 @@ import concurrent.futures
 import asyncio
 
 minRAM = int(os.getenv('minRAM', '128'))  # default to 128MB
+bucketName = os.getenv('bucketName', 'image-resizer-upload')
+download_bucket = os.getenv('download_bucket', 'image-resizer-download')
+prefix = os.getenv('prefix', '')
 
 def lambda_handler(event, context):
     # read input from event
     # data = extract_data_from_input(event)
     lambdaARN = event['lambdaARN']
+    function_name = lambdaARN.split(':')[-1]
     value = event['value'] if 'value' in event else None # this is the input value
     # if payloadS3 is present, it will be used to fetch the payload
-    value = event['payloads3'] if 'payloadS3' in event else value 
+    # value = event['payloads3'] if 'payloadS3' in event else value 
+    if function_name == 'image-resizer':
+        value = {
+            'value': value,
+            'bucket': bucketName,
+            'download_bucket': download_bucket,
+            'prefix': prefix,
+            'function_name': function_name
+        }
     num = event['num']
     powerValues = event['powerValues']
     dryRun = event['dryRun'] if 'dryRun' in event else False
@@ -83,7 +95,7 @@ def lambda_handler(event, context):
 def validate_input(lambdaARN, value, num, powerValues):
     if not lambdaARN:
         raise ValueError('Missing or empty lambdaARN')
-    if not value or not isinstance(value, (int, float)):
+    if not value or not isinstance(value, (int, float, str, dict)):
         raise ValueError('Invalid value: ' + str(value))
     if not num or not isinstance(num, int):
         raise ValueError('Invalid num: ' + str(num))

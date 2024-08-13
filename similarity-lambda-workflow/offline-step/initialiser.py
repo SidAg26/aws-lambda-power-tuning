@@ -27,11 +27,18 @@ def lambda_handler(event, context):
 
     utils.set_lambda_power(lambda_arn, initial_power)
 
+    if 'payloads3' in event:
+        return {"powerValues": power_values, "sla": sla, 
+                "payloads3": payload, "lambdaARN": lambda_arn, 
+                "num": num, "startTime": int(time.time()*1000)}
+
     return {"powerValues": power_values, "sla": sla, 
             "payload": payload, "lambdaARN": lambda_arn, 
             "num": num, "startTime": int(time.time()*1000)}
 
 def extract_payload(event):
+    if 'payloads3' in event:
+        return event['payloads3']
     payload = event.get('payload')  # could be undefined
 
     # use default value (defined at deploy-time) if not provided

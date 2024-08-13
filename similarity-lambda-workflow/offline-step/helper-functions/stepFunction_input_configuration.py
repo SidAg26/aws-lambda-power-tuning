@@ -38,3 +38,25 @@ config = {
     "stepSize": 100
   }
 }
+
+
+
+
+# Image Resizer
+
+{
+  "lambdaARN": "arn:aws:lambda:ap-southeast-2:030103857128:function:image-resizer",
+  "num": 3,
+  "sla": {
+    "value": "10"
+  },
+  "powerValues": [
+    128,
+    512,
+    3008
+  ],
+  "payloads3": {
+    "bucket": "image-resizer-upload",
+    "prefix": ""
+  }
+}

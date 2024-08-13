@@ -10,6 +10,7 @@ import numpy as np
 import base64
 from botocore.exceptions import NoCredentialsError
 from urllib.parse import urlparse, urlencode
+from botocore import config
 
 # AWS Lambda client
 lambda_client = boto3.client('lambda')
@@ -141,8 +142,13 @@ def create_power_configuration(lambda_arn, value, alias):
             raise error
 
 def lambda_client_from_arn(lambda_arn):
+    lambda_config = config.Config(
+    read_timeout=900,
+    connect_timeout=900,
+    retries={"max_attempts": 0
+             })
     region = lambda_arn.split(":")[3]
-    return boto3.client('lambda', region_name=region)
+    return boto3.client('lambda', region_name=region, config=lambda_config)
 
 def wait_for_function_update(lambda_arn):
     print('Waiting for update to complete')
@@ -225,7 +231,17 @@ async def invoke_lambda_processor(processor_arn, payload, pre_or_post='Pre', dis
 
 def invoke_lambda_with_processors(lambda_arn, alias, payload, disable_payload_logs):
     # actual_payload = { 'payload': payload }  # might change based on pre-processor 
-    actual_payload = {'n': payload} # as per matmul example
+    if isinstance(payload, dict) and payload.get('function_name') == 'image-resizer':
+        actual_payload = { 
+            'S3Object':
+                  {
+                    'Bucket':  payload['bucket'],
+                    'Name': payload['value'],
+                    'Download_Bucket': payload['download_bucket']
+                  }
+        }
+    else:
+        actual_payload = {'n': payload} # as per matmul example
     # # first invoke pre-processor, if provided
     # if pre_arn:
     #     print('Invoking pre-processor')
