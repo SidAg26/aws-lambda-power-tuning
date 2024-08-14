@@ -142,6 +142,7 @@ def create_power_configuration(lambda_arn, value, alias):
             raise error
 
 def lambda_client_from_arn(lambda_arn):
+    # Fixing the READTIMEOUT error in Lambda
     lambda_config = config.Config(
     read_timeout=900,
     connect_timeout=900,
