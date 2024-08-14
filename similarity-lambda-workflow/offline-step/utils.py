@@ -241,6 +241,8 @@ def invoke_lambda_with_processors(lambda_arn, alias, payload, disable_payload_lo
                     'Download_Bucket': payload['download_bucket']
                   }
         }
+    elif lambda_arn.split(":")[-1] == 'workbench-chameleon':
+        actual_payload = {'num_of_rows': payload, 'num_of_cols': payload}
     else:
         actual_payload = {'n': payload} # as per matmul example
     # # first invoke pre-processor, if provided
