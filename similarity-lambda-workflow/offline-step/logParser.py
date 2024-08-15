@@ -119,11 +119,13 @@ def lambda_handler(event, context):
                 'payload': extract_payload_value(event['message'])
             }
     # print(parsed_events)
-    _table_name = f'{lambda_arn.split(":")[-1]}_logs' # ENTER THE DYNAMODB TABLE NAME
-    _dynamodb = dynamodb_client_from_arn(lambda_arn)
-    existing_tables = _dynamodb.list_tables()['TableNames']
+    _table_name = f'{lambda_arn.split(":")[-1]}_logs'  # ENTER THE DYNAMODB TABLE NAME
+    _dynamodb_client = boto3.client('dynamodb', region_name=lambda_arn.split(":")[3])
+    _dynamodb_resource = boto3.resource('dynamodb', region_name=lambda_arn.split(":")[3])
+    
+    existing_tables = _dynamodb_client.list_tables()['TableNames']
     if _table_name not in existing_tables:
-        _table = _dynamodb.create_table(
+        _dynamodb_client.create_table(
             TableName=_table_name,
             KeySchema=[
                 {
@@ -142,14 +144,17 @@ def lambda_handler(event, context):
                 'WriteCapacityUnits': 5
             }
         )
+        _table = _dynamodb_resource.Table(_table_name)
         _table.wait_until_exists()
     else:
-        _table = _dynamodb.Table(_table_name)
+        _table = _dynamodb_resource.Table(_table_name)
+    
     process_logs_in_batch(parsed_events, _table, 25)
 
     # Update the environment variables
     set_enviroment_variables(start_time, end_time, lambda_arn, insight_function_name, _table_name)
     return end_time
+
 
 def set_enviroment_variables(start_time, end_time, lambda_arn, function_name, table_name):
     _client = boto3.client('lambda', region_name=lambda_arn.split(":")[3])
